@@ -52,7 +52,8 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); padding: 7px 12px; border-radius: 6px; cursor: pointer; font-weight: 500; }
 .btn.ghost { background: transparent; color: var(--accent); }
 main { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; min-width: 0; }
-.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--panel); }
+.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--panel); min-height: 42px; flex-shrink: 0; }
+.tabs > * { flex: 0 0 auto; }
 .tab { border: none; background: none; padding: 8px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab.on { color: var(--ink); border-color: var(--accent); font-weight: 500; }
 .view { position: relative; min-height: 0; overflow: auto; }
@@ -96,6 +97,8 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
 .samples figure { margin: 0; background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
 .samples img { width: 100%; height: auto; display: block; }
 .samples figcaption { font-size: 12px; color: #333; padding: 6px 4px 2px; }
+.files { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 1100px; margin: 0 auto 12px; }
+.files b { margin-right: 4px; }
 .note { font-size: 13px; color: var(--muted); max-width: 70ch; }
 @media (max-width: 1100px) { .cols { grid-template-columns: 200px minmax(0, 1fr); } .right { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line); max-height: 70vh; } }
 @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } main { order: 1; grid-template-rows: auto 55vh auto; } .right { order: 2; max-height: none; } aside { order: 3; border-right: none; border-top: 1px solid var(--line); } header .pill:not(.warn) { display: none; } }
@@ -154,6 +157,7 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 // ===== МАФ-ядро (порт Python-ядра mafbot): сортамент, модель, шаблоны, раскрой, смета, разбор текста =====
@@ -486,14 +490,14 @@ function estimate(prod, pr = PRICES) {
 
 // ---- разбор текста (без ИИ)
 const KINDS = [["pergola", ["пергол"]], ["rotunda", ["ротонд", "беседк"]], ["container", ["контейнер", "мусорн", "площадк"]], ["urn", ["урн"]], ["bench", ["скам", "лавк", "лавоч"]], ["canopy", ["навес"]]];
-const NUM = "(\\d+(?:[.,]\\d+)?)", X = "\\s*[xх×*]\\s*";
+const NUM = "(\\d+(?:[.,]\\d+)?)", X = "\\s*[xх×*]\\s*", XP = "(?:\\s*[xх×*]\\s*|\\s+на\\s+)";
 const f = s => parseFloat(s.replace(",", "."));
 const mm = (v, smallM = true) => smallM && v < 30 ? Math.round(v * 1000) : Math.round(v);
 const wall = (a, b) => { const m = Math.max(a, b); return m <= 40 ? 2 : m <= 80 ? 3 : m <= 120 ? 4 : 5; };
 function detect(t) { t = t.toLowerCase(); for (const [k, ws] of KINDS) if (ws.some(w => t.includes(w))) return k; return null; }
 function profAfter(t, words, wood) {
   for (const w of words) {
-    const m = t.match(new RegExp(w + "[а-яё]*\\s*(?:из\\s+)?(?:(профтруб[а-яё]*|пт|труб[а-яё]*|брус[а-яё]*|доск[а-яё]*|уголк?[а-яё]*)\\s*)?" + NUM + X + NUM + "(?:" + X + NUM + ")?"));
+    const m = t.match(new RegExp(w + "[а-яё]*\\s*(?:из\\s+)?(?:(профтруб[а-яё]*|пт|труб[а-яё]*|брус[а-яё]*|доск[а-яё]*|уголк?[а-яё]*)\\s*)?" + NUM + XP + NUM + "(?:" + XP + NUM + ")?"));
     if (m) {
       const k = (m[1] || ""), a = f(m[2]), b = f(m[3]), c = m[4] ? f(m[4]) : null;
       if (k.startsWith("брус") || (wood && !k)) return `Брус ${a}x${b}`;
@@ -509,21 +513,24 @@ function numAfter(t, words) { for (const w of words) { const m = t.match(new Reg
 function parseText(text, kind) {
   const t = " " + text.toLowerCase().replace(/ё/g, "е") + " "; kind = detect(t) || kind; const p = {};
   if (["pergola", "canopy"].includes(kind)) {
-    const m = t.match(new RegExp("(?<![\\d.,])" + NUM + X + NUM + "(?:\\s*м(?![а-я]))?(?!" + X + ")"));
+    const m = t.match(new RegExp("(?<![\\d.,])" + NUM + "(?:" + X + "|\\s+на\\s+)" + NUM + "(?:\\s*м(?![а-я]))?(?!" + X + ")"));
     if (m) { const before = t.slice(Math.max(0, m.index - 14), m.index); if (!/(стойк|балк|ламел|брус|доск|труб|пт|обреш|стропил|уголок|каркас)/.test(before)) { p.L = mm(f(m[1])); p.W = mm(f(m[2])); } }
   }
   let v;
   if ((v = numAfter(t, ["длин"]))) p.L = mm(v);
   if ((v = numAfter(t, ["ширин"]))) p[kind === "bench" ? "depth" : "W"] = mm(v);
   if ((v = numAfter(t, ["высот"]))) p[{ bench: "seat_h", canopy: "H_front" }[kind] || "H"] = mm(v);
-  if ((v = numAfter(t, ["диаметр"])) && kind === "rotunda") p.D = mm(v);
+  if ((v = numAfter(t, ["диаметр", " d", "ø", " д"])) && kind === "rotunda") p.D = mm(v);
   if ((v = numAfter(t, ["купол"])) && kind === "rotunda") p.roof_h = mm(v);
   if ((v = numAfter(t, ["спереди"])) && kind === "canopy") p.H_front = mm(v);
   if ((v = numAfter(t, ["сзади"])) && kind === "canopy") p.H_back = mm(v);
   if (kind === "bench" && !p.L) { const m = t.match(new RegExp("(?:скам|лавк|лавоч)[а-я]*\\s+" + NUM)); if (m) p.L = mm(f(m[1])); }
   if (kind === "container") { const m = t.match(/(\d+)\s*(?:контейнер|бак)/); if (m) p.containers = +m[1]; if (/0[.,]75/.test(t)) p.volume = 0.75; if (/1[.,]1/.test(t)) p.volume = 1.1; if (/без крыш/.test(t)) p.roof = false; else if (/крыш|навес/.test(t)) p.roof = true; if (/калитк|двер/.test(t)) p.gate = true; }
-  if (kind === "urn") { const m = t.match(new RegExp(NUM + X + NUM + X + NUM)); if (m) { p.W = mm(f(m[1]), false); p.D = mm(f(m[2]), false); p.H = mm(f(m[3]), false); } }
-  let m = t.match(/(\d+)\s*(?:-?\s*ти|-?\s*х)?\s*(?:стоек|стойки|опор|гран)/);
+  if (kind === "urn") { const m = t.match(new RegExp(NUM + X + NUM + X + NUM)); if (m) { p.W = mm(f(m[1]), false); p.D = mm(f(m[2]), false); p.H = mm(f(m[3]), false); } if (/без нож/.test(t)) p.legs = false; else if (/на нож/.test(t)) p.legs = true; }
+  const WORDN = { "четырех": 4, "пяти": 5, "шести": 6, "семи": 7, "восьми": 8, "девяти": 9, "десяти": 10, "двенадцати": 12 };
+  const wm = t.match(/(четырех|пяти|шести|семи|восьми|девяти|десяти|двенадцати)\s*-?\s*(?:гран|угольн|стоеч)/);
+  if (wm && kind === "rotunda") p.posts = WORDN[wm[1]];
+  let m = t.match(/(?<!на\s)(?<![\d.,])(\d+)\s*(?:-?\s*ти|-?\s*х)?\s*(?:стоек|стойки|опор|гран)/);
   if (m) { if (kind === "rotunda") p.posts = +m[1]; else if (["pergola", "canopy"].includes(kind)) p.posts_along = Math.max(2, Math.floor(+m[1] / 2)); }
   const PRO = [["post", ["стойк", "столб"]], ["beam", ["балк"]], ["lamel", ["ламел"]], ["ring", ["обвязк"]], ["rafter", ["стропил"]], ["rail", ["перил", "ригел"]], ["purlin", ["обрешетк", "прогон"]], ["frame", ["каркас", "ножк"]]];
   for (const [k, ws] of PRO) { const pr = profAfter(t, ws, false); if (pr) p[k] = pr; }
@@ -583,7 +590,7 @@ function addVersion(sp) { const o = obj(); o.versions = o.versions.slice(0, o.v 
 
 function botReply(sp, changes, t0) {
   const r = ENG.build(sp.kind, sp.params), t = ENG.totals(r), est = ENG.estimate(r, S.prices);
-  let s = `✅ Готово за ${((performance.now() - t0) / 1000).toFixed(2)} с — ${r.title}\nДеталей ${t.parts}, позиций ${ENG.positions(r).length}, вес ${fmt(t.total, 1)} кг\nОриентировочная цена ${fmt(est.price)} ₽`;
+  let s = `✅ Готово — ${r.title}\nДеталей ${t.parts}, позиций ${ENG.positions(r).length}, вес ${fmt(t.total, 1)} кг\nОриентировочная цена ${fmt(est.price)} ₽`;
   if (changes) s += "\n\nИзменено:\n" + changes.map(c => "• " + c).join("\n");
   s += "\n\nПринято при чтении:\n" + r.asm.slice(0, 5).map(a => "• " + a).join("\n") + "\n\nЧтобы поправить — напишите, что изменить.";
   return s;
@@ -657,55 +664,170 @@ function viewPolys(r, v) {
   const [pr, dp] = VIEWS[v];
   return r.elements.map(e => { const C = ENG.corners(e); const d = C.reduce((s, p) => s + dp(p), 0) / 8; return { d, poly: hull(C.map(pr)), e }; }).sort((a, b) => b.d - a.d);
 }
-function sheetSVG(r) {
-  const Wp = 420, Hp = 297, V = {}; for (const v of ["front", "side", "top"]) { const ps = viewPolys(r, v); const all = ps.flatMap(p => p.poly); const xs = all.map(p => p[0]), ys = all.map(p => p[1]); V[v] = { ps, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; }
-  const wF = V.front.x1 - V.front.x0, hF = V.front.y1 - V.front.y0, wS = V.side.x1 - V.side.x0, hT = V.top.y1 - V.top.y0, wT = V.top.x1 - V.top.x0;
-  const avW = Wp - 25 - 10 - 2 * 28, avH = Hp - 10 - 60 - 2 * 26;
-  const SC = [1, 2, 2.5, 4, 5, 10, 15, 20, 25, 40, 50, 75, 100];
-  const S = SC.find(s => (Math.max(wF, wT) + wS) / s <= avW && (hF + hT) / s <= avH) || 100;
-  const out = [];
-  const L = (x1, y1, x2, y2, w = 0.25, extra = "") => out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#111" stroke-width="${w}" ${extra}/>`);
-  const Tx = (x, y, s, h = 3.5, a = "start", extra = "") => out.push(`<text x="${x}" y="${y}" font-size="${h}" text-anchor="${a}" font-family="IBM Plex Sans, Arial" fill="#111" ${extra}>${esc(s)}</text>`);
-  out.push(`<rect x="0" y="0" width="${Wp}" height="${Hp}" fill="#fff"/><rect x="20" y="5" width="${Wp - 25}" height="${Hp - 10}" fill="none" stroke="#111" stroke-width="0.7"/>`);
-  const place = { front: [20 + 30, 5 + 14], side: [20 + 30 + Math.max(wF, wT) / S + 36, 5 + 14], top: [20 + 30, 5 + 14 + hF / S + 30] };
+// Лист строится как набор примитивов в мм бумаги (y вниз); из него получаются SVG и DXF (1:1, рамка ×S)
+function buildSheet(r) {
+  const Wp = 420, Hp = 297, V = {};
+  for (const v of ["front", "side", "top"]) { const ps = viewPolys(r, v); const all = ps.flatMap(p => p.poly); const xs = all.map(p => p[0]), ys = all.map(p => p[1]); V[v] = { ps, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; }
+  const wF = V.front.x1 - V.front.x0, hF = V.front.y1 - V.front.y0, wS = V.side.x1 - V.side.x0, hS = V.side.y1 - V.side.y0, hT = V.top.y1 - V.top.y0, wT = V.top.x1 - V.top.x0;
+  const ps = ENG.positions(r), specH = 10 + 7 * Math.min(ps.length, 14);
+  const avW = Wp - 20 - 5 - 3 * 26, avH = Hp - 10 - 2 * 26 - 10;
+  const SC = [1, 2, 2.5, 4, 5, 10, 15, 20, 25, 40, 50, 75, 100, 150, 200];
+  // справа от вида слева — колонка спецификации 185 мм; под планом/справа — штамп
+  const S = SC.find(s => (Math.max(wF, wT) + wS) / s + 185 + 20 <= avW + 52 && (hF + hT) / s <= avH && (hS / s) <= Hp - 10 - 55 - specH - 30) || 200;
+  const P = [];
+  const L = (x1, y1, x2, y2, layer = "ТОНКАЯ") => P.push({ t: "line", x1, y1, x2, y2, layer });
+  const T = (x, y, s, h = 3.5, a = "start", layer = "ТЕКСТ", rot = 0) => P.push({ t: "text", x, y, s: String(s), h, a, layer, rot });
+  const R = (x, y, w, h, layer = "РАМКА") => P.push({ t: "poly", pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], layer, fill: null });
+  R(0, 0, Wp, Hp, "РАМКА_ТОНКАЯ"); R(20, 5, Wp - 25, Hp - 10, "РАМКА");
+  const place = { front: [20 + 26, 5 + 16], side: [20 + 26 + Math.max(wF, wT) / S + 30, 5 + 16], top: [20 + 26, 5 + 16 + hF / S + 28] };
   const dim = (xa, ya, xb, yb, off, txt, vert) => {
-    if (!vert) { const y = ya + off; L(xa, ya, xa, y + (off > 0 ? 1.5 : -1.5), 0.18); L(xb, yb, xb, y + (off > 0 ? 1.5 : -1.5), 0.18); L(xa, y, xb, y, 0.18, 'marker-start="url(#ar)" marker-end="url(#ar)"'); Tx((xa + xb) / 2, y - 1, txt, 3, "middle"); }
-    else { const x = xa + off; L(xa, ya, x - 1.5, ya, 0.18); L(xb, yb, x - 1.5, yb, 0.18); L(x, ya, x, yb, 0.18, 'marker-start="url(#ar)" marker-end="url(#ar)"'); Tx(x - 1, (ya + yb) / 2, txt, 3, "middle", `transform="rotate(-90 ${x - 1} ${(ya + yb) / 2})"`); }
+    if (!vert) { const y = ya + off; L(xa, ya, xa, y + Math.sign(off) * 1.5, "РАЗМЕРЫ"); L(xb, yb, xb, y + Math.sign(off) * 1.5, "РАЗМЕРЫ"); L(xa, y, xb, y, "РАЗМЕРЫ"); P.push({ t: "arrow", x: xa, y, dx: 1, dy: 0, layer: "РАЗМЕРЫ" }, { t: "arrow", x: xb, y, dx: -1, dy: 0, layer: "РАЗМЕРЫ" }); T((xa + xb) / 2, y - 1, txt, 3.5, "middle", "РАЗМЕРЫ"); }
+    else { const x = xa + off; L(xa, ya, x - 1.5, ya, "РАЗМЕРЫ"); L(xb, yb, x - 1.5, yb, "РАЗМЕРЫ"); L(x, ya, x, yb, "РАЗМЕРЫ"); P.push({ t: "arrow", x, y: ya, dx: 0, dy: -1, layer: "РАЗМЕРЫ" }, { t: "arrow", x, y: yb, dx: 0, dy: 1, layer: "РАЗМЕРЫ" }); T(x - 1, (ya + yb) / 2, txt, 3.5, "middle", "РАЗМЕРЫ", 90); }
   };
+  const LAYER = { steel: "МЕТАЛЛ", wood: "ДЕРЕВО", concrete: "БЕТОН" };
+  const callout = {};
   for (const v of ["front", "side", "top"]) {
-    const { ps, x0, x1, y0, y1 } = V[v], [ox, oy] = place[v], h = (y1 - y0) / S;
+    const { ps: polys, x0, x1, y0, y1 } = V[v], [ox, oy] = place[v], h = (y1 - y0) / S;
     const tr = p => [ox + (p[0] - x0) / S, oy + h - (p[1] - y0) / S];
-    for (const { poly, e } of ps) { if (poly.length < 3) continue; const s = ENG.info(e); const fill = s.mat === "wood" ? "#f6ead9" : s.mat === "concrete" ? "#ececea" : "#ffffff"; out.push(`<polygon points="${poly.map(p => tr(p).join(",")).join(" ")}" fill="${fill}" stroke="#111" stroke-width="0.35" stroke-linejoin="round"/>`); }
-    const w = (x1 - x0) / S;
-    dim(ox, oy + h, ox + w, oy + h, 9, fmt(x1 - x0), false);
-    dim(ox, oy + h, ox, oy, -9, fmt(y1 - y0), true);
+    for (const { poly, e } of polys) {
+      if (poly.length < 3) continue; const s = ENG.info(e);
+      const pts = poly.map(tr);
+      P.push({ t: "poly", pts, layer: LAYER[s.mat], fill: s.mat === "wood" ? "#f6ead9" : s.mat === "concrete" ? "#ececea" : "#ffffff" });
+      if (v === "front" || v === "top") { const c = pts.reduce((a, q) => [a[0] + q[0] / pts.length, a[1] + q[1] / pts.length], [0, 0]); callout[e._pos] = callout[e._pos] || { v, c }; }
+    }
+    dim(ox, oy + h, ox + (x1 - x0) / S, oy + h, 10, Math.round(x1 - x0), false);
+    dim(ox, oy + h, ox, oy, -10, Math.round(y1 - y0), true);
   }
-  Tx(place.top[0], place.top[1] - 4, "Вид сверху", 3.5); Tx(place.side[0], place.side[1] - 4 + 0, "Вид слева", 3.5);
-  // штамп ГОСТ 2.104 ф.1 (упрощённо)
-  const sx = Wp - 5 - 185, sy = Hp - 5 - 55;
-  out.push(`<rect x="${sx}" y="${sy}" width="185" height="55" fill="#fff" stroke="#111" stroke-width="0.7"/>`);
-  L(sx + 65, sy, sx + 65, sy + 55, 0.7); L(sx + 65, sy + 15, sx + 185, sy + 15, 0.7); L(sx + 65, sy + 40, sx + 185, sy + 40, 0.7); L(sx + 135, sy + 15, sx + 135, sy + 55, 0.7); L(sx + 135, sy + 20, sx + 185, sy + 20, 0.25); L(sx + 135, sy + 35, sx + 185, sy + 35, 0.25); L(sx + 150, sy + 15, sx + 150, sy + 35, 0.25); L(sx + 167, sy + 15, sx + 167, sy + 35, 0.25);
-  for (let i = 1; i < 11; i++) L(sx, sy + i * 5, sx + 65, sy + i * 5, i === 5 ? 0.7 : 0.18);
-  [7, 17, 40, 55].forEach(x => L(sx + x, sy, sx + x, sy + 55, 0.5));
-  const t = ENG.totals(r);
-  Tx(sx + 125, sy + 10.5, "АРМ." + { pergola: "01", rotunda: "02", bench: "03", canopy: "04", urn: "05", container: "06" }[r.kind] + ".000000.000 СБ", 6, "middle");
-  Tx(sx + 100, sy + 26, r.title, 4, "middle"); Tx(sx + 100, sy + 33, "Сборочный чертёж", 3, "middle");
-  Tx(sx + 142.5, sy + 18.5, "Лит.", 2.2, "middle"); Tx(sx + 158.5, sy + 18.5, "Масса", 2.2, "middle"); Tx(sx + 176, sy + 18.5, "Масштаб", 2.2, "middle");
-  Tx(sx + 158.5, sy + 29, fmt(t.total, 1), 3.5, "middle"); Tx(sx + 176, sy + 29, "1:" + S, 3.5, "middle"); Tx(sx + 160, sy + 49, "ООО «Армаф»", 3.5, "middle");
-  ["Разраб.", "Пров.", "Т.контр.", "", "Н.контр.", "Утв."].forEach((s, i) => Tx(sx + 1, sy + 28.5 + i * 5, s, 2.2));
-  Tx(sx + 18, sy + 28.5, "МАФ-конструктор", 2.2);
-  Tx(25, Hp - 9, "Демо-лист в браузере. Полный комплект КД по ЕСКД (СБ, спецификация, деталировка, DXF для КОМПАС) выпускает серверное ядро.", 2.6);
-  return `<svg viewBox="0 0 ${Wp} ${Hp}" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ar" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,2 L10,5 L0,8 z" fill="#111"/></marker></defs>${out.join("")}</svg>`;
+  // позиции на полках (ГОСТ 2.109)
+  const used = [];
+  Object.entries(callout).sort((a, b) => a[0] - b[0]).forEach(([pos, { v, c }], k) => {
+    const [ox, oy] = place[v]; let ly = oy - 8 + (k % 3) * 0, lx = c[0] + 10;
+    ly = c[1] - 10 - (k % 4) * 6; if (ly < 8) ly = c[1] + 10 + (k % 4) * 6;
+    while (used.some(u => Math.abs(u[0] - lx) < 9 && Math.abs(u[1] - ly) < 5)) ly -= 6;
+    used.push([lx, ly]);
+    P.push({ t: "dot", x: c[0], y: c[1], layer: "ПОЗИЦИИ" }); L(c[0], c[1], lx, ly, "ПОЗИЦИИ"); L(lx, ly, lx + 7, ly, "ПОЗИЦИИ"); T(lx + 3.5, ly - 1, pos, 5, "middle", "ПОЗИЦИИ");
+  });
+  T(place.side[0], place.side[1] - 5, "Вид слева", 3.5); T(place.top[0], place.top[1] - 5, "Вид сверху", 3.5);
+  // спецификация (упрощённо, над штампом)
+  const sx = Wp - 5 - 185, sy = Hp - 5 - 55, cols = [[10, "Поз."], [55, "Наименование"], [45, "Профиль"], [30, "Размер"], [12, "Кол."], [33, "Масса, кг"]];
+  const ty = sy - specH - 4;
+  R(sx, ty, 185, specH, "РАМКА"); let cx = sx;
+  cols.forEach(([w, n]) => { T(cx + w / 2, ty + 6.5, n, 3, "middle"); cx += w; if (cx < sx + 185) L(cx, ty, cx, ty + specH, "РАМКА_ТОНКАЯ"); });
+  L(sx, ty + 10, sx + 185, ty + 10, "РАМКА");
+  ps.slice(0, 14).forEach((g, i) => {
+    const y = ty + 10 + 7 * (i + 1); L(sx, y, sx + 185, y, "РАМКА_ТОНКАЯ");
+    const vals = [g.pos, g.name, g.profile, g.dims, g.qty, fmt(g.mass, 1)]; let x = sx;
+    cols.forEach(([w], j) => { const txt = String(vals[j]); const fit = txt.length * 1.7 > w - 2 ? txt.slice(0, Math.floor((w - 2) / 1.7)) : txt; T(j === 1 || j === 2 ? x + 1.5 : x + w / 2, y - 2, fit, 3, j === 1 || j === 2 ? "start" : "middle"); x += w; });
+  });
+  // штамп ГОСТ 2.104 ф.1
+  R(sx, sy, 185, 55, "РАМКА");
+  [[65, 0, 65, 55], [65, 15, 185, 15], [65, 40, 185, 40], [135, 15, 135, 55]].forEach(([a, b, c, d]) => L(sx + a, sy + b, sx + c, sy + d, "РАМКА"));
+  [[135, 20, 185, 20], [135, 35, 185, 35], [150, 15, 150, 35], [167, 15, 167, 35]].forEach(([a, b, c, d]) => L(sx + a, sy + b, sx + c, sy + d, "РАМКА_ТОНКАЯ"));
+  for (let i = 1; i < 11; i++) L(sx, sy + i * 5, sx + 65, sy + i * 5, i === 5 ? "РАМКА" : "РАМКА_ТОНКАЯ");
+  [7, 17, 40, 55].forEach(x => L(sx + x, sy, sx + x, sy + 55, "РАМКА"));
+  const t = ENG.totals(r), code = "АРМ." + ({ pergola: "01", rotunda: "02", bench: "03", canopy: "04", urn: "05", container: "06" }[r.kind]) + "." + new Date().toISOString().slice(2, 10).replace(/-/g, "") + ".000 СБ";
+  T(sx + 125, sy + 10.5, code, 6, "middle");
+  T(sx + 100, sy + 26, r.title, r.title.length > 30 ? 3.2 : 4, "middle"); T(sx + 100, sy + 33, "Сборочный чертёж", 3, "middle");
+  T(sx + 142.5, sy + 18.5, "Лит.", 2.2, "middle"); T(sx + 158.5, sy + 18.5, "Масса", 2.2, "middle"); T(sx + 176, sy + 18.5, "Масштаб", 2.2, "middle");
+  T(sx + 158.5, sy + 29, fmt(t.total, 1), 3.5, "middle"); T(sx + 176, sy + 29, "1:" + S, 3.5, "middle"); T(sx + 160, sy + 49, "ООО «Армаф»", 3.5, "middle");
+  T(sx + 1, sy + 23.5, "Изм.  Лист    № докум.     Подп.  Дата", 2.2);
+  ["Разраб.", "Пров.", "Т.контр.", "", "Н.контр.", "Утв."].forEach((s, i) => T(sx + 1, sy + 28.5 + i * 5, s, 2.2));
+  T(sx + 18, sy + 28.5, "МАФ-конструктор", 2.2);
+  T(25, Hp - 9, "Черновой лист из демо-версии. Размеры проверить перед запуском в производство.", 2.6);
+  return { P, Wp, Hp, S, code };
+}
+function sheetSVG(r) {
+  const { P, Wp, Hp } = buildSheet(r), out = [];
+  const W = { "РАМКА": 0.7, "МЕТАЛЛ": 0.4, "ДЕРЕВО": 0.4, "БЕТОН": 0.4 };
+  for (const p of P) {
+    const w = W[p.layer] || 0.2;
+    if (p.t === "line") out.push(`<line x1="${p.x1}" y1="${p.y1}" x2="${p.x2}" y2="${p.y2}" stroke="#111" stroke-width="${w}"/>`);
+    if (p.t === "poly") out.push(`<polygon points="${p.pts.map(q => q.join(",")).join(" ")}" fill="${p.fill || "none"}" stroke="#111" stroke-width="${w}" stroke-linejoin="round"/>`);
+    if (p.t === "dot") out.push(`<circle cx="${p.x}" cy="${p.y}" r="0.7" fill="#111"/>`);
+    if (p.t === "arrow") { const a = [p.x, p.y], l = 3, b = 0.8; const pts = [a, [p.x + p.dx * l - p.dy * b, p.y + p.dy * l + p.dx * b], [p.x + p.dx * l + p.dy * b, p.y + p.dy * l - p.dx * b]]; out.push(`<polygon points="${pts.map(q => q.join(",")).join(" ")}" fill="#111"/>`); }
+    if (p.t === "text") out.push(`<text x="${p.x}" y="${p.y}" font-size="${p.h}" text-anchor="${p.a}" font-family="IBM Plex Sans, Arial" fill="#111"${p.rot ? ` transform="rotate(${-p.rot} ${p.x} ${p.y})"` : ""}>${esc(p.s)}</text>`);
+  }
+  return `<svg viewBox="0 0 ${Wp} ${Hp}" xmlns="http://www.w3.org/2000/svg"><rect width="${Wp}" height="${Hp}" fill="#fff"/>${out.join("")}</svg>`;
 }
 
+// ---------- DXF R12 (ASCII, кодировка Windows-1251 — открывает КОМПАС V16+ и AutoCAD)
+const DXF_LAYERS = { "РАМКА": 7, "РАМКА_ТОНКАЯ": 7, "МЕТАЛЛ": 7, "ДЕРЕВО": 30, "БЕТОН": 8, "РАЗМЕРЫ": 3, "ТЕКСТ": 7, "ПОЗИЦИИ": 7, "ТОНКАЯ": 7, "РЕЗ": 1, "ПОДПИСИ": 3 };
+function dxfDoc(ents) {
+  const lay = Object.entries(DXF_LAYERS).map(([n, c]) => `0\nLAYER\n2\n${n}\n70\n0\n62\n${c}\n6\nCONTINUOUS`).join("\n");
+  return `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$DWGCODEPAGE\n3\nANSI_1251\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n70\n${Object.keys(DXF_LAYERS).length}\n${lay}\n0\nENDTAB\n0\nTABLE\n2\nSTYLE\n70\n1\n0\nSTYLE\n2\nSTANDARD\n70\n0\n40\n0.0\n41\n1.0\n50\n0.0\n71\n0\n42\n2.5\n3\ntxt\n4\n\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${ents.join("\n")}\n0\nENDSEC\n0\nEOF\n`;
+}
+const n4 = v => (+v).toFixed(3);
+const dLine = (x1, y1, x2, y2, l) => `0\nLINE\n8\n${l}\n10\n${n4(x1)}\n20\n${n4(y1)}\n30\n0.0\n11\n${n4(x2)}\n21\n${n4(y2)}\n31\n0.0`;
+const dPoly = (pts, l) => `0\nPOLYLINE\n8\n${l}\n66\n1\n70\n1\n10\n0.0\n20\n0.0\n30\n0.0\n` + pts.map(p => `0\nVERTEX\n8\n${l}\n10\n${n4(p[0])}\n20\n${n4(p[1])}\n30\n0.0`).join("\n") + `\n0\nSEQEND\n8\n${l}`;
+const dCircle = (x, y, r, l) => `0\nCIRCLE\n8\n${l}\n10\n${n4(x)}\n20\n${n4(y)}\n30\n0.0\n40\n${n4(r)}`;
+const dText = (x, y, s, h, a, rot, l) => { const ha = a === "middle" ? 1 : a === "end" ? 2 : 0; s = s.replace(/[×]/g, "x").replace(/Ø/g, "%%c"); return `0\nTEXT\n8\n${l}\n10\n${n4(x)}\n20\n${n4(y)}\n30\n0.0\n40\n${n4(h)}\n1\n${s}\n50\n${rot || 0}\n72\n${ha}` + (ha ? `\n11\n${n4(x)}\n21\n${n4(y)}\n31\n0.0` : ""); };
+function cp1251(str) {
+  const out = new Uint8Array(str.length); const extra = { "Ё": 0xA8, "ё": 0xB8, "№": 0xB9, "«": 0xAB, "»": 0xBB, "—": 0x97, "–": 0x96, "°": 0xB0, "±": 0xB1, "…": 0x85, "‰": 0x89, "\u202F": 0x20, "\u00A0": 0x20, "\u2009": 0x20, "×": 0x78, "Ø": 0xD8 };
+  for (let i = 0; i < str.length; i++) { const ch = str[i], c = ch.charCodeAt(0);
+    out[i] = c < 128 ? c : c >= 0x410 && c <= 0x44F ? c - 0x410 + 0xC0 : extra[ch] !== undefined ? extra[ch] : 0x3F; }
+  return out;
+}
+function sheetDXF(r) {
+  const { P, Hp, S } = buildSheet(r), E = [];
+  const X = x => x * S, Y = y => (Hp - y) * S;          // бумага (мм, y вниз) -> модель 1:1 (y вверх)
+  for (const p of P) {
+    if (p.t === "line") E.push(dLine(X(p.x1), Y(p.y1), X(p.x2), Y(p.y2), p.layer));
+    if (p.t === "poly") E.push(dPoly(p.pts.map(q => [X(q[0]), Y(q[1])]), p.layer));
+    if (p.t === "dot") E.push(dCircle(X(p.x), Y(p.y), 0.7 * S, p.layer));
+    if (p.t === "arrow") { const l = 3, b = 0.8; E.push(dPoly([[p.x, p.y], [p.x + p.dx * l - p.dy * b, p.y + p.dy * l + p.dx * b], [p.x + p.dx * l + p.dy * b, p.y + p.dy * l - p.dx * b]].map(q => [X(q[0]), Y(q[1])]), p.layer)); }
+    if (p.t === "text") E.push(dText(X(p.x), Y(p.y), p.s, p.h * S, p.a, p.rot, p.layer));
+  }
+  return dxfDoc(E);
+}
+function platesDXF(r) {
+  const plates = r.elements.filter(e => ENG.info(e).kind === "plate"); if (!plates.length) return null;
+  const E = []; let x = 0, y = 0, row = 0; const W = 1500, gap = 10;
+  const groups = ENG.positions(r).filter(g => g.kind === "plate");
+  E.push(dPoly([[0, 0], [W, 0], [W, 3000], [0, 3000]], "ПОДПИСИ")); E.push(dText(0, 3030, `Лист ${ENG.info(plates[0]).t} мм, 1500x3000 — раскладка пластин`, 40, "start", 0, "ПОДПИСИ"));
+  for (const g of groups) for (let k = 0; k < g.qty; k++) {
+    const e = g.els[k], [w, h] = ENG.boxSize(e);
+    if (x + w + gap > W) { x = 0; y += row + gap; row = 0; }
+    const ox = x + gap, oy = y + gap;
+    E.push(dPoly([[ox, oy], [ox + w, oy], [ox + w, oy + h], [ox, oy + h]], "РЕЗ"));
+    e.holes.forEach(([hx, hy, d]) => E.push(dCircle(ox + w / 2 + hx, oy + h / 2 + hy, d / 2, "РЕЗ")));
+    E.push(dText(ox + w / 2, oy + h / 2, "поз." + g.pos, Math.min(20, h / 6), "middle", 0, "ПОДПИСИ"));
+    x += w + gap; row = Math.max(row, h);
+  }
+  return dxfDoc(E);
+}
+function download(name, data, mime) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+function fname(r, suffix) { return (r.title.replace(/[^\wА-Яа-яЁё×x.,-]+/g, "_") + "_" + suffix).replace(/_+/g, "_"); }
+function getFile(kind) {
+  if (!prod) return;
+  try {
+    if (kind === "sb") download(fname(prod, "СБ.dxf"), cp1251(sheetDXF(prod)), "application/dxf");
+    if (kind === "plates") { const d = platesDXF(prod); if (!d) return note("В этом изделии нет пластин для лазера."); download(fname(prod, "пластины.dxf"), cp1251(d), "application/dxf"); }
+    if (kind === "xlsx") {
+      if (!window.XLSX) return note("Не загрузилась библиотека Excel — проверьте интернет.");
+      const wb = XLSX.utils.book_new(), ps = ENG.positions(prod), t = ENG.totals(prod), e = ENG.estimate(prod, S.prices);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Поз.", "Наименование", "Профиль / материал", "ГОСТ", "Размер, мм", "Кол.", "Масса ед., кг", "Масса, кг"], ...ps.map(g => [g.pos, g.name, g.profile, g.gost, g.dims, g.qty, +g.mass1.toFixed(2), +g.mass.toFixed(2)]), [], ["", "Итого, кг", "", "", "", "", "", +t.total.toFixed(1)]]), "Спецификация");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Профиль", "Хлыст / заготовка, мм", "№", "Детали (длина, поз.)", "Остаток, мм", "Остаток"], ...ENG.cutting(prod).flatMap(c => c.bars.map((b, i) => [c.profile, c.stock, i + 1, b.cuts.map(x => `${x.L} (п.${x.pos})`).join(" + "), b.rest, b.usable ? "деловой" : "в отход"]))]), "Раскрой");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Раздел", "Наименование", "Ед.", "Кол-во", "Цена, ₽", "Сумма, ₽"], ...e.lines.map(l => [l[0], l[1], l[2], +l[3].toFixed(3), l[4], Math.round(l[3] * l[4])]), [], ["", "Метизы и расходники", "", "", "", Math.round(e.hw)], ["", "Себестоимость", "", "", "", Math.round(e.cost)], ["", "Накладные", "", "", "", Math.round(e.over)], ["", "Цена изделия", "", "", "", Math.round(e.price)]]), "Смета");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Принято самостоятельно — проверить"], ...prod.asm.map(a => [a])]), "Допущения");
+      XLSX.writeFile(wb, fname(prod, "спецификация_раскрой_смета.xlsx"));
+    }
+  } catch (err) { note("Не получилось собрать файл: " + err.message); }
+}
+function note(t) { const o = obj(); if (o) { o.log.push({ who: "bot", text: t }); save(); render(); } }
+const FILES_BAR = `<div class="files"><b>Файлы для КОМПАС</b><button class="btn" data-file="sb">Сборочный чертёж DXF</button><button class="btn ghost" data-file="plates">Пластины для лазера DXF</button><button class="btn ghost" data-file="xlsx">Спецификация, раскрой, смета XLSX</button></div>`;
+
 // ---------- вкладки
-const TABS = [["3d", "3D"], ["sheet", "Чертёж"], ["spec", "Спецификация"], ["cut", "Раскрой"], ["cost", "Смета"], ["kd", "Пример КД из ядра"]];
+const TABS = [["3d", "3D"], ["sheet", "Чертёж и файлы"], ["spec", "Спецификация"], ["cut", "Раскрой"], ["cost", "Смета"], ["kd", "Пример КД из ядра"]];
 function renderTabs() { $("#tabs").innerHTML = TABS.map(([k, n]) => `<button class="tab ${tab === k ? "on" : ""}" id="tab-${k}" data-t="${k}">${n}</button>`).join(""); }
 function renderPane() {
   const pane = $("#pane"), is3d = tab === "3d";
   $("#v3d").style.display = is3d ? "" : "none"; $("#hint").style.display = is3d ? "" : "none"; pane.hidden = is3d;
   if (is3d || !prod) return;
-  if (tab === "sheet") pane.innerHTML = `<div class="sheet">${sheetSVG(prod)}</div>`;
+  if (tab === "sheet") pane.innerHTML = (platesDXF(prod) ? FILES_BAR : FILES_BAR.replace(/<button[^>]*data-file="plates"[^>]*>[^<]*<\/button>/, "")) + `<div class="sheet">${sheetSVG(prod)}</div>`;
   if (tab === "spec") {
     const ps = ENG.positions(prod);
     pane.innerHTML = `<table><thead><tr><th>Поз.</th><th>Наименование</th><th>Профиль / материал</th><th>Размер, мм</th><th class="n">Кол.</th><th class="n">Масса ед., кг</th><th class="n">Масса, кг</th></tr></thead><tbody>${ps.map(g => `<tr><td class="mono">${g.pos}</td><td>${esc(g.name)}</td><td>${esc(g.profile)}<br><small class="mono" style="color:var(--muted)">${esc(g.gost)}</small></td><td class="mono">${g.dims}</td><td class="n">${g.qty}</td><td class="n">${fmt(g.mass1, 2)}</td><td class="n">${fmt(g.mass, 1)}</td></tr>`).join("")}</tbody></table>`;
@@ -741,7 +863,7 @@ function render() {
   const o = obj(), sp = spec();
   $("#objects").innerHTML = S.objects.map(x => `<button class="item ${x.id === S.cur ? "on" : ""}" data-o="${x.id}">${esc(x.title)}<small>версий: ${x.versions.length}</small></button>`).join("") || '<p class="note">Пока пусто</p>';
   $("#versions").innerHTML = o ? o.versions.map((v, i) => `<button class="item ${i === o.v ? "on" : ""}" data-v="${i}">v${i + 1}<small>${esc(ENG.build(v.kind, v.params).title)}</small></button>`).join("") : "";
-  $("#log").innerHTML = o ? o.log.map(m => `<div class="msg ${m.who}">${esc(m.text)}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button></div>` : ""}</div>`).join("") : "";
+  $("#log").innerHTML = o ? o.log.map(m => `<div class="msg ${m.who}">${esc(m.text)}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button><button data-file="sb">⬇ DXF для КОМПАС</button></div>` : ""}</div>`).join("") : "";
   $("#log").scrollTop = 1e9;
   prod = sp ? ENG.build(sp.kind, sp.params) : null;
   if (prod) {
@@ -758,6 +880,7 @@ document.addEventListener("click", ev => {
   const b = ev.target.closest("button"); if (!b) return;
   if (b.dataset.t) { tab = b.dataset.t; renderTabs(); renderPane(); }
   if (b.dataset.go) { tab = b.dataset.go; renderTabs(); renderPane(); }
+  if (b.dataset.file) getFile(b.dataset.file);
   if (b.dataset.o) { S.cur = b.dataset.o; save(); render(); }
   if (b.dataset.v) { obj().v = +b.dataset.v; save(); render(); }
   if (b.dataset.ex) { S.cur = null; send(EXAMPLES[+b.dataset.ex][1]); }
