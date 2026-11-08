@@ -820,14 +820,14 @@ function send(text) {
 const AI_URL = "https://vanya-bot.skottipi0.workers.dev/ai";
 const TG_INIT = (() => { try { return (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || ""; } catch (e) { return ""; } })();
 let AI_CODE = (() => { try { return localStorage.getItem("maf-ai-code") || ""; } catch (e) { return ""; } })();
-let PENDING = [];
-const aiReady = () => !!(TG_INIT || AI_CODE);
+let PENDING = [], TG_TRY = !!TG_INIT;   // в Telegram сначала пробуем без кода (если id в списке доверенных)
+const aiReady = () => !!(AI_CODE || TG_TRY);
 function aiPillRender() { const b = $("#aiPill"); if (!b) return; b.textContent = aiReady() ? "ИИ: включён" : "ИИ: подключить"; b.classList.toggle("on", aiReady()); }
 function askCode(reason) { const o = obj() || newObject("Новый объект"); o.log.push({ who: "bot", text: (reason ? reason + "\n\n" : "") + "Чтобы ИИ читал свободный текст, эскизы, фото и PDF, введите код доступа (его выдаёт администратор). Код хранится только в этом браузере.", aicode: true }); save(); render(); }
 async function callAI(text, files, current) {
-  const r = await fetch(AI_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Auth": TG_INIT ? "tg " + TG_INIT : "code " + AI_CODE }, body: JSON.stringify({ text, files, current }) });
+  const r = await fetch(AI_URL, { method: "POST", headers: Object.assign({ "Content-Type": "application/json", "X-Auth": TG_INIT ? "tg " + TG_INIT : "code " + AI_CODE }, AI_CODE ? { "X-Code": AI_CODE } : {}), body: JSON.stringify({ text, files, current }) });
   let d = {}; try { d = await r.json(); } catch (e) {}
-  if (r.status === 401) { AI_CODE = ""; try { localStorage.removeItem("maf-ai-code"); } catch (e) {} aiPillRender(); throw Object.assign(new Error("auth"), { auth: true }); }
+  if (r.status === 401) { AI_CODE = ""; TG_TRY = false; try { localStorage.removeItem("maf-ai-code"); } catch (e) {} aiPillRender(); throw Object.assign(new Error("auth"), { auth: true }); }
   if (!r.ok || !d.ok) throw new Error(d.message || "ИИ недоступен (" + r.status + ")");
   return d;
 }
@@ -878,7 +878,7 @@ async function sendAI(text, files) {
   save(); render();
 }
 document.addEventListener("click", e => {
-  if (e.target.closest("#aiPill")) { if (TG_INIT) { alertMsg("ИИ включён: вход через Telegram."); return; } askCode(aiReady() ? "ИИ уже включён. Можно ввести другой код." : ""); return; }
+  if (e.target.closest("#aiPill")) { askCode(aiReady() ? "ИИ уже включён. Можно ввести другой код." : ""); return; }
   if (e.target.closest("#clip")) { if (!aiReady()) { askCode("Читать эскизы, фото и PDF умеет только ИИ."); return; } $("#file").click(); return; }
   const u = e.target.closest("[data-unattach]"); if (u) { PENDING.splice(+u.dataset.unattach, 1); renderAttach(); return; }
   const c = e.target.closest("[data-aicodeok]"); if (c) { const v = c.parentElement.querySelector("input").value.trim(); if (!v) return; AI_CODE = v; try { localStorage.setItem("maf-ai-code", v); } catch (er) {} const o = obj(); o.log = o.log.filter(m => !m.aicode); o.log.push({ who: "bot", text: "🤖 Код сохранён. Пишите задание свободным текстом или приложите эскиз 📎. Если код неверный, я попрошу его ещё раз." }); save(); render(); aiPillRender(); }
