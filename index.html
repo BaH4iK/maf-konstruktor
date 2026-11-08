@@ -318,7 +318,7 @@ const DEF = {
   canopy: { L: 4000, W: 3000, H_front: 2500, H_back: 2200, post: "ПТ 80x80x3", beam: "ПТ 80x60x3", purlin: "ПТ 40x20x2", purlin_step: 600, overhang: 300, posts_along: 2, plate: 200, plate_t: 8 },
   container: { containers: 2, volume: 1.1, H: 1800, frame: "ПТ 50x50x2", rail: "ПТ 40x20x2", sheet: "Профлист С8 0.5", roof: true, slab: true, gate: false },
   urn: { W: 400, D: 400, H: 750, frame: "ПТ 20x20x1.5", side: "Лист 1.5", legs: true, base: "Лист 4" },
-  deck: { shape: "круг", D: 2400, sides: 6, L: 2000, W: 1200, L2: 1000, H: 450, slat: "Брус 88x40", gap: 15, rib: "ПТ 40x40x2", rib_step: 600, support: "metal" },
+  deck: { shape: "круг", D: 2400, sides: 6, L: 2000, W: 1200, L2: 1000, H: 450, slat: "Брус 88x40", gap: 15, min_len: 100, rib: "ПТ 40x40x2", rib_step: 600, support: "metal" },
   profile: { shape: "кресло", L: 700, Wd: 550, H: 400, f: 120, A: 120, waves: 1, back_h: 650, back_tilt: 22, seat_tilt: 6, slat: "Брус 58x40", gap: 12, rib: "ПТ 40x40x2", rib_step: 600 },
 };
 const LABELS = {
@@ -331,7 +331,7 @@ const LABELS = {
   H_front: "Высота спереди, мм", H_back: "Высота сзади, мм", purlin: "Обрешётка", purlin_step: "Шаг обрешётки, мм", overhang: "Свес кровли, мм",
   containers: "Контейнеров, шт", volume: "Объём контейнера, м³ (0.75 / 1.1)", sheet: "Обшивка", roof: "Крыша", slab: "Бетонное основание", gate: "Калитка (дверцы)",
   side: "Стенки", legs: "На ножках", base: "Дно",
-  shape: "Форма", sides: "Число граней (многоугольник)", L2: "Верхнее основание трапеции, мм", rib: "Рёбра / лаги", rib_step: "Шаг рёбер, мм (не более)",
+  shape: "Форма", sides: "Число граней (многоугольник)", L2: "Верхнее основание трапеции, мм", rib: "Рёбра / лаги", rib_step: "Шаг рёбер, мм (не более)", min_len: "Мин. длина доски, мм (короче — не ставится)",
   Wd: "Глубина / развёртка профиля, мм", f: "Прогиб дуги, мм (− выпуклая)", A: "Амплитуда волны, мм", waves: "Число волн", seat_tilt: "Наклон сиденья, °",
 };
 const SHAPES = { deck: ["круг", "многоугольник", "трапеция", "прямоугольник", "капля", "рыба"], profile: ["кресло", "шезлонг", "дуга", "волна"] };
@@ -505,13 +505,13 @@ T.deck = (params) => {
     for (const m of scan(poly, yc, 1)) {
       const A = pick(scan(poly, ya + 0.5, 1), m) || m, B = pick(scan(poly, yb - 0.5, 1), m) || m;
       const xs = Math.min(A[0], B[0]), xe = Math.max(A[1], B[1]), Lmax = xe - xs, Lmin = Math.min(A[1], B[1]) - Math.max(A[0], B[0]);
-      if (Lmin < 100) { dropped++; continue; }
+      if (Math.min(Lmin, m[1] - m[0]) < Math.max(100, +p.min_len || 0)) { dropped++; continue; }
       const e = El("Доска настила", slat.code, [xs, yc, zb], [xe, yc, zb], { cut: [A[0] - xs, B[0] - xs, xe - A[1], xe - B[1]] });
       const deg = d => Math.round(Math.atan2(Math.abs(d), b) * 180 / Math.PI);
-      boards.push({ e, y: yc, xs, xe, Lmax: Math.round(Lmax), Lmin: Math.round(Lmin), aL: deg(B[0] - A[0]), aR: deg(B[1] - A[1]) }); els.push(e);
+      boards.push({ e, y: yc, xs, xe, Lmax: Math.round(Lmax), Lmin: Math.round(Lmin), Lax: Math.round(m[1] - m[0]), aL: deg(B[0] - A[0]), aR: deg(B[1] - A[1]) }); els.push(e);
     }
   }
-  if (dropped) asm.push(`Крайние доски короче 100 мм не ставятся: ${dropped} шт.`);
+  if (dropped) asm.push(`Крайние доски короче ${Math.max(100, +p.min_len || 0)} мм не ставятся: ${dropped} шт.`);
   // рёбра поперёк досок
   const inset = Math.min(120, (x1 - x0) / 6), span = x1 - x0 - 2 * inset, nr = Math.max(2, Math.ceil(span / p.rib_step) + 1), ribs = [];
   const zr = zTop - slat.h - rib.h / 2;
@@ -526,7 +526,7 @@ T.deck = (params) => {
     }
   }
   const prod = { title: `Настил «${p.shape}» ${String(p.shape).startsWith("кру") || String(p.shape).startsWith("мног") ? "D" + p.D : p.L + "×" + p.W}`, params: p, elements: els, asm };
-  prod.boards = boards.map((bd, i) => ({ no: i + 1, e: bd.e, y: Math.round(bd.y), Lmax: bd.Lmax, Lmin: bd.Lmin, aL: bd.aL, aR: bd.aR }));
+  prod.boards = boards.map((bd, i) => ({ no: i + 1, e: bd.e, y: Math.round(bd.y), Lmax: bd.Lmax, Lmin: bd.Lmin, Lax: bd.Lax, aL: bd.aL, aR: bd.aR }));
   prod.layoutType = "А";
   fasten(prod, boards, ribs, b, "deck");
   asm.push(`Тип А: ${boards.length} досок ${slat.code} параллельно, зазор ${p.gap}, торцы режутся по контуру (углы — в ведомости досок)`);
@@ -689,6 +689,7 @@ function parseText(text, kind) {
   if (kind === "deck") {
     if (/кругл|круг /.test(t)) p.shape = "круг"; else if (/трапец/.test(t)) p.shape = "трапеция"; else if (/рыб|карас/.test(t)) p.shape = "рыба"; else if (/капл/.test(t)) p.shape = "капля"; else if (/прямоуг/.test(t)) p.shape = "прямоугольник"; else if (/гран|многоуг|угольн/.test(t)) p.shape = "многоугольник";
     if ((v = numAfter(t, ["верх", "верхн", "меньш"]))) { p.L2 = mm(v); p.shape = "трапеция"; }
+    if ((v = numAfter(t, ["минимальн[а-я]* длин[а-я]*", "доски не короче", "не короче"]))) { p.min_len = mm(v, false); if (p.L === p.min_len || p.L === mm(v)) delete p.L; }
     if ((v = numAfter(t, ["основани", "низ"])) && p.shape === "трапеция") p.L = mm(v);
   }
   if (kind === "profile") {
@@ -809,13 +810,13 @@ const FORM = {
   canopy: ["L", "W", "H_front", "H_back", "post", "purlin", "purlin_step"],
   container: ["containers", "volume", "roof", "gate", "slab"],
   urn: ["W", "D", "H", "legs"],
-  deck: ["shape", "D", "sides", "L", "L2", "W", "H", "slat", "gap", "support"],
+  deck: ["shape", "D", "sides", "L", "L2", "W", "H", "slat", "gap", "min_len", "support"],
   profile: ["shape", "L", "Wd", "H", "back_tilt", "f", "A", "waves", "slat", "gap"],
 };
 const KIND_BTN = [["pergola", "Пергола"], ["rotunda", "Ротонда"], ["bench", "Скамья"], ["canopy", "Навес"], ["deck", "Настил по контуру"], ["profile", "Кресло / волна / дуга"], ["urn", "Урна"], ["container", "Контейнерная площадка"]];
 const TUBES = ["ПТ 20x20x1.5", "ПТ 40x20x2", "ПТ 40x40x2", "ПТ 50x50x2", "ПТ 60x40x3", "ПТ 60x60x3", "ПТ 80x40x3", "ПТ 80x60x3", "ПТ 80x80x3", "ПТ 100x100x4", "ПТ 120x80x4"];
 const OPTS = { post: TUBES, beam: TUBES, lamel: TUBES, frame: TUBES, rib: TUBES, purlin: TUBES, ring: TUBES, rafter: TUBES, rail: TUBES,
-  slat: ["Брус 88x40", "Брус 58x40", "Брус 38x38"], support: [["concrete", "бетон"], ["metal", "металл"]], volume: [[0.75, "0,75 м³"], [1.1, "1,1 м³"]] };
+  slat: ["Брус 88x40", "Брус 58x40", "Брус 38x38", "Брус 140x40"], support: [["concrete", "бетон"], ["metal", "металл"]], volume: [[0.75, "0,75 м³"], [1.1, "1,1 м³"]] };
 function formKeys(kind, p) { // поля, которые имеют смысл при текущей форме
   let ks = FORM[kind]; const sh = String(p.shape || ENG.DEF[kind].shape || "");
   if (kind === "deck") ks = ks.filter(k => !({ D: !/^(кру|мног)/.test(sh), sides: !/^мног/.test(sh), L: /^(кру|мног)/.test(sh), W: /^(кру|мног)/.test(sh), L2: !/^трап/.test(sh) }[k]));
@@ -1106,7 +1107,7 @@ function getFile(kind) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Поз.", "Наименование", "Профиль / материал", "ГОСТ", "Размер, мм", "Кол.", "Масса ед., кг", "Масса, кг"], ...ps.map(g => [g.pos, g.name, g.profile, g.gost, g.dims, g.qty, +g.mass1.toFixed(2), +g.mass.toFixed(2)]), [], ["", "Итого, кг", "", "", "", "", "", +t.total.toFixed(1)]]), "Спецификация");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Профиль", "Хлыст / заготовка, мм", "№", "Детали (длина, поз.)", "Остаток, мм", "Остаток"], ...ENG.cutting(prod).flatMap(c => c.bars.map((b, i) => [c.profile, c.stock, i + 1, b.cuts.map(x => `${x.L} (п.${x.pos})`).join(" + "), b.rest, b.usable ? "деловой" : "в отход"]))]), "Раскрой");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Раздел", "Наименование", "Ед.", "Кол-во", "Цена, ₽", "Сумма, ₽"], ...e.lines.map(l => [l[0], l[1], l[2], +l[3].toFixed(3), l[4], Math.round(l[3] * l[4])]), [], ["", "Метизы и расходники", "", "", "", Math.round(e.hw)], ["", "Себестоимость", "", "", "", Math.round(e.cost)], ["", "Накладные", "", "", "", Math.round(e.over)], ["", "Цена изделия", "", "", "", Math.round(e.price)]]), "Смета");
-      if (prod.boards) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["№", "Поз.", "Y оси, мм", "L max, мм", "L min, мм", "Угол слева, °", "Угол справа, °"], ...prod.boards.map(b => [b.no, b.e._pos, b.y, b.Lmax, b.Lmin, b.aL, b.aR])]), "Ведомость досок");
+      if (prod.boards) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["№", "Поз.", "Y оси, мм", "L по оси, мм", "L max, мм", "L min, мм", "Угол слева, °", "Угол справа, °"], ...prod.boards.map(b => [b.no, b.e._pos, b.y, b.Lax, b.Lmax, b.Lmin, b.aL, b.aR])]), "Ведомость досок");
       if (prod.layout) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["№", "S по кривой, мм", "Y, мм", "Z, мм", "Угол, °"], ...prod.layout.map(l => [l.no, l.s, l.y, l.z, l.ang]), [], ["Развёртка профиля, мм", prod.curveLen]]), "Раскладка по профилю");
       if (prod.fasten) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[prod.fasten.note], ["Пересечений", prod.fasten.crossings, "Саморезов", prod.fasten.screws], [], ["Ребро", "Поз.", "Отверстий", "Координаты от начала ребра, мм"], ...prod.fasten.holes.map((x, i) => [i + 1, x.rib._pos, x.list.length, x.list.join("; ")])]), "Отверстия в рёбрах");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Принято самостоятельно — проверить"], ...prod.asm.map(a => [a])]), "Допущения");
@@ -1182,7 +1183,7 @@ document.addEventListener("click", e => {
 // ---------- ведомости движка ламелей
 function lamelTables(r) {
   let h = "";
-  if (r.boards) h += `<h2 style="margin-top:20px">Ведомость досок (тип А — по контуру)</h2><p class="note">Доски параллельны, зазор постоянный. Угол реза — от перпендикуляра к оси доски; L max / L min — длина по длинной и короткой кромке.</p><table><thead><tr><th>№</th><th>Поз.</th><th class="n">Y оси, мм</th><th class="n">L max</th><th class="n">L min</th><th class="n">Угол слева, °</th><th class="n">Угол справа, °</th></tr></thead><tbody>${r.boards.map(b => `<tr><td class="mono">${b.no}</td><td class="mono">${b.e._pos}</td><td class="n">${b.y}</td><td class="n">${b.Lmax}</td><td class="n">${b.Lmin}</td><td class="n">${b.aL}</td><td class="n">${b.aR}</td></tr>`).join("")}</tbody></table>`;
+  if (r.boards) h += `<h2 style="margin-top:20px">Ведомость досок (тип А — по контуру)</h2><p class="note">Доски параллельны, зазор постоянный. L по оси — длина по средней линии доски (так считает инженер); L max / L min — по длинной и короткой кромке, для заказа заготовки бери L max. Угол реза — от перпендикуляра к оси доски.</p><table><thead><tr><th>№</th><th>Поз.</th><th class="n">Y оси, мм</th><th class="n">L по оси</th><th class="n">L max</th><th class="n">L min</th><th class="n">Угол слева, °</th><th class="n">Угол справа, °</th></tr></thead><tbody>${r.boards.map(b => `<tr><td class="mono">${b.no}</td><td class="mono">${b.e._pos}</td><td class="n">${b.y}</td><td class="n">${b.Lax}</td><td class="n">${b.Lmax}</td><td class="n">${b.Lmin}</td><td class="n">${b.aL}</td><td class="n">${b.aR}</td></tr>`).join("")}</tbody></table>`;
   if (r.layout) h += `<h2 style="margin-top:20px">Раскладка досок по профилю (тип Б)</h2><p class="note">Все доски одной длины. S — расстояние по кривой от начала профиля до оси доски (развёртка ${r.curveLen} мм); Y, Z — положение оси доски; угол — наклон доски.</p><table><thead><tr><th>№</th><th class="n">S по кривой</th><th class="n">Y</th><th class="n">Z</th><th class="n">Угол, °</th></tr></thead><tbody>${r.layout.map(l => `<tr><td class="mono">${l.no}</td><td class="n">${l.s}</td><td class="n">${l.y}</td><td class="n">${l.z}</td><td class="n">${l.ang}</td></tr>`).join("")}</tbody></table>`;
   if (r.fasten) h += `<h2 style="margin-top:20px">Скрытый крепёж — отверстия в рёбрах</h2><p class="note">${esc(r.fasten.note)} Пересечений ${r.fasten.crossings}, саморезов ${r.fasten.screws} шт. Координата — от начала ребра${r.layout ? " по развёртке" : ""}, мм.</p><table><thead><tr><th>Ребро</th><th class="n">Отв.</th><th>Координаты отверстий, мм</th></tr></thead><tbody>${r.fasten.holes.map((x, i) => `<tr><td class="mono">${i + 1} (поз. ${x.rib._pos})</td><td class="n">${x.list.length}</td><td class="mono" style="font-size:12px">${x.list.join(" · ")}</td></tr>`).join("")}</tbody></table>`;
   return h;
