@@ -804,7 +804,18 @@ function platesDXF(r) {
   }
   return dxfDoc(E);
 }
+const IN_TG = (() => { try { const tw = window.Telegram && Telegram.WebApp; return !!(tw && tw.initData); } catch (e) { return false; } })();
+function openInBrowser() {
+  const sp = spec(); let url = location.href.split("#")[0];
+  if (sp) url += "#spec=" + encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(sp)))));
+  try { Telegram.WebApp.openLink(url); } catch (e) { window.open(url, "_blank"); }
+}
 function download(name, data, mime) {
+  if (IN_TG) {
+    const go = () => openInBrowser();
+    try { Telegram.WebApp.showConfirm("Telegram не даёт скачивать файлы. Открыть это изделие в браузере? Там нажмите кнопку файла ещё раз.", ok => { if (ok) go(); }); } catch (e) { go(); }
+    return;
+  }
   const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
@@ -935,8 +946,11 @@ function alertMsg(t) { obj().log.push({ who: "bot", text: t }); render(); }
 $("#pane").addEventListener("change", ev => { const k = ev.target.dataset.pk; if (!k) return; S.prices[k] = parseFloat(ev.target.value) || 0; save(); render(); });
 $("#examples").innerHTML = EXAMPLES.map(([n], i) => `<button class="chip" data-ex="${i}">${n}</button>`).join("");
 
-try { const tw = window.Telegram && Telegram.WebApp; if (tw && tw.initData !== undefined) { tw.ready(); tw.expand(); document.documentElement.dataset.theme = tw.colorScheme === "dark" ? "dark" : "light"; } } catch (e) {}
 init3d();
+try {
+  const m = location.hash.match(/^#spec=(.+)$/);
+  if (m) { const sp = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1]))))); if (sp && ENG.DEF[sp.kind]) { newObject(""); addVersion({ kind: sp.kind, params: sp.params || {} }); obj().log.push({ who: "bot", text: "Изделие открыто из Telegram. Файлы для КОМПАС — на вкладке «Чертёж и файлы»." }); tab = "sheet"; save(); } history.replaceState(null, "", location.pathname); }
+} catch (e) {}
 if (!S.objects.length) { send(EXAMPLES[0][1]); send("стойки 80х80, шаг ламелей 250"); S.cur = null; send(EXAMPLES[2][1]); S.cur = S.objects[1].id; }
 render();
 </script>
