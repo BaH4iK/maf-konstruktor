@@ -68,6 +68,15 @@ main { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; min-widt
 .zoomwrap { overflow: auto; max-height: 75vh; border-radius: 4px; touch-action: pan-x pan-y pinch-zoom; }
 .zoomwrap .sheet, .zoomwrap img { max-width: none; margin: 0; }
 .zfig { position: relative; }
+.compose .clip { padding: 0 12px; font-size: 18px; align-self: stretch; }
+.attach { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 0; }
+.attach .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--panel); }
+.attach .chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 3px; }
+.attach .chip button { border: 0; background: none; cursor: pointer; font-size: 14px; color: var(--muted); }
+#aiPill { cursor: pointer; font: inherit; }
+#aiPill.on { color: #1d7a3a; border-color: #8fd0a2; background: #effaf2; }
+.msg .thumbs { display: flex; gap: 6px; margin-top: 6px; } .msg .thumbs img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+.aibox { display: flex; gap: 6px; margin-top: 8px; } .aibox input { flex: 1; font: 14px var(--f-mono, monospace); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .drawbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
 .drawbar .btn { padding: 6px 10px; font-size: 13px; }
 .drawhint { font-size: 12px; color: var(--muted); margin-left: 4px; }
@@ -133,7 +142,7 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
     <div class="logo">МАФ·<b>конструктор</b></div>
     <span class="pill">Армаф · Севастополь</span>
     <span class="sp"></span>
-    <span class="pill warn" title="Разбор текста по правилам, без нейросети">демо без ИИ</span>
+    <button type="button" class="pill warn" id="aiPill" title="ИИ читает свободный текст, эскизы, фото и PDF">ИИ: подключить</button>
   </header>
   <div class="cols">
     <aside>
@@ -168,7 +177,10 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
       <div class="rtabs"><button class="tab on" data-r="chat" id="rt-chat">Диалог</button><button class="tab" data-r="params" id="rt-params">Параметры</button></div>
       <div id="rpane-chat" class="chat">
         <div class="log" id="log"></div>
+        <div class="attach" id="attach" hidden></div>
         <div class="compose">
+          <button type="button" class="btn ghost clip" id="clip" title="Приложить эскиз, фото или PDF" aria-label="Приложить файл">📎</button>
+          <input type="file" id="file" accept="image/*,application/pdf" multiple hidden>
           <textarea id="input" placeholder="Что начертить или поправить? Например: «стойки 80х80», «добавь спинку», «шаг ламелей 250»"></textarea>
           <button class="btn" id="send">Отправить</button>
         </div>
@@ -784,7 +796,9 @@ function botReply(sp, changes, t0) {
   return s;
 }
 function send(text) {
-  text = text.trim(); if (!text) return;
+  text = text.trim(); const files = PENDING; if (!text && !files.length) return;
+  if (files.length) { PENDING = []; renderAttach(); if (aiReady()) { sendAI(text, files); return; } askCode("Читать эскизы, фото и PDF умеет только ИИ."); return; }
+  if (aiReady() && !ENG.interpret(text, spec())) { sendAI(text, []); return; }
   const t0 = performance.now();
   let o = obj(); const cur = spec();
   const res = ENG.interpret(text, cur);
@@ -801,6 +815,76 @@ function send(text) {
   }
   save(); render();
 }
+
+// ---------- ИИ через Cloudflare Worker (ключ хранится только там; здесь — ни одного секрета)
+const AI_URL = "https://vanya-bot.skottipi0.workers.dev/ai";
+const TG_INIT = (() => { try { return (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || ""; } catch (e) { return ""; } })();
+let AI_CODE = (() => { try { return localStorage.getItem("maf-ai-code") || ""; } catch (e) { return ""; } })();
+let PENDING = [];
+const aiReady = () => !!(TG_INIT || AI_CODE);
+function aiPillRender() { const b = $("#aiPill"); if (!b) return; b.textContent = aiReady() ? "ИИ: включён" : "ИИ: подключить"; b.classList.toggle("on", aiReady()); }
+function askCode(reason) { const o = obj() || newObject("Новый объект"); o.log.push({ who: "bot", text: (reason ? reason + "\n\n" : "") + "Чтобы ИИ читал свободный текст, эскизы, фото и PDF, введите код доступа (его выдаёт администратор). Код хранится только в этом браузере.", aicode: true }); save(); render(); }
+async function callAI(text, files, current) {
+  const r = await fetch(AI_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Auth": TG_INIT ? "tg " + TG_INIT : "code " + AI_CODE }, body: JSON.stringify({ text, files, current }) });
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  if (r.status === 401) { AI_CODE = ""; try { localStorage.removeItem("maf-ai-code"); } catch (e) {} aiPillRender(); throw Object.assign(new Error("auth"), { auth: true }); }
+  if (!r.ok || !d.ok) throw new Error(d.message || "ИИ недоступен (" + r.status + ")");
+  return d;
+}
+function shrinkImage(file) { // фото с телефона → JPEG до 1600 px: быстрее и дешевле
+  return new Promise((res, rej) => { const img = new Image(), url = URL.createObjectURL(file); img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", 0.85)); }; img.onerror = rej; img.src = url; });
+}
+function fileToData(file) { return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); }); }
+async function addFiles(list) {
+  for (const f of [...list].slice(0, 3 - PENDING.length)) {
+    try {
+      if (f.type === "application/pdf") { if (f.size > 4.5e6) { alertMsg("PDF больше 4,5 МБ — пришлите страницы картинками."); continue; } PENDING.push({ name: f.name, mime: f.type, url: await fileToData(f) }); }
+      else if (f.type.startsWith("image/")) PENDING.push({ name: f.name, mime: "image/jpeg", url: await shrinkImage(f) });
+    } catch (e) { alertMsg("Не удалось прочитать файл " + f.name); }
+  }
+  renderAttach();
+}
+function renderAttach() { const a = $("#attach"); a.hidden = !PENDING.length; a.innerHTML = PENDING.map((f, i) => `<span class="chip">${f.mime.startsWith("image") ? `<img src="${f.url}" alt="">` : "📄"}${esc(f.name.slice(0, 24))}<button type="button" data-unattach="${i}" aria-label="Убрать">✕</button></span>`).join(""); }
+const cleanParams = (kind, p) => { const d = ENG.DEF[kind], out = {}; for (const k in p || {}) { if (!(k in d)) continue; let v = p[k]; if (typeof d[k] === "number") { v = parseFloat(String(v).replace(",", ".")); if (!isFinite(v)) continue; } if (typeof d[k] === "boolean") v = v === true || v === "true" || v === "да"; out[k] = v; } return out; };
+function applyAI(o, d, cur) {
+  const res = d.result || {}, items = res.items || [], seen = new Set(), ok = [], other = [];
+  for (const it of items) { const key = JSON.stringify([it.kind, it.name, it.params]); if (seen.has(key)) continue; seen.add(key); (ENG.DEF[it.kind] ? ok : other).push(it); }
+  const model = /sonnet/.test(d.model || "") ? "Sonnet" : /haiku/.test(d.model || "") ? "Haiku" : "ИИ";
+  const note = other.map(it => it.kind === "refuse" ? `• ${it.name || "Изделие"} — не делаем (здания и помещения)` : `• ${it.name || "Изделие"}${it.params && it.params.L ? ` ${it.params.L}×${it.params.W || "?"}×${it.params.H || "?"}` : ""}${it.qty > 1 ? ` — ${it.qty} шт.` : ""} — нет шаблона, нужен инженер или эталон`).join("\n");
+  if (!ok.length) { o.log.push({ who: "bot", text: `🤖 ${model}: ` + (note ? "по этому заданию шаблонов нет:\n" + note : "не понял задание.") + (res.question ? "\n\nВопрос: " + res.question : ""), choose: !note }); return; }
+  const targets = [];
+  ok.forEach((it, i) => {
+    const params = cleanParams(it.kind, it.params), edit = cur && i === 0 && ok.length === 1 && cur.kind === it.kind;
+    let target = o; if (!edit && (i > 0 || (o.versions.length && spec()))) { target = newObject("Новый объект"); const um = o.log.filter(m => m.who === "user").slice(-1)[0]; if (um) target.log.push(Object.assign({}, um)); }
+    targets.push(target);
+    const head = `🤖 ${model} прочитал${ok.length > 1 ? ` (позиция ${i + 1} из ${ok.length})` : ""}: ${it.name || ENG.KIND_TITLE[it.kind]}${it.qty > 1 ? ` — ${it.qty} шт.` : ""}` + ((it.assumptions || []).length ? "\nПринял сам: " + it.assumptions.slice(0, 4).join("; ") : "") + (res.question && i === 0 ? "\n\n❓ " + res.question : "") + (note && i === 0 ? "\n\nБез шаблона:\n" + note : "");
+    const miss = edit ? [] : missingCore(it.kind, params);
+    if (miss.length) { target.log.push({ who: "bot", text: head }); pushForm(target, it.kind, params, miss); return; }
+    try { ENG.build(it.kind, params); } catch (e) { target.log.push({ who: "bot", text: head + "\n\nОшибка в параметрах: " + e.message }); return; }
+    S.cur = target.id; addVersion({ kind: it.kind, params: edit ? Object.assign({}, cur.params, params) : params });
+    target.log.push({ who: "bot", text: head + "\n\n" + botReply(spec(), null), acts: true });
+  });
+  if (targets.length) S.cur = targets[0].id;
+  if (ok.length > 1) targets[0].log.push({ who: "bot", text: `📋 Из задания создано изделий: ${ok.length} — ${ok.map(it => (it.name || ENG.KIND_TITLE[it.kind]) + (it.qty > 1 ? ` ×${it.qty}` : "")).join(", ")}. Все они — в списке «Мои объекты».` + (note ? "\n\nБез шаблона:\n" + note : "") });
+}
+async function sendAI(text, files) {
+  let o = obj(); const cur = spec();
+  if (!o) o = newObject("Новый объект");
+  o.log.push({ who: "user", text: text || "(вложение)", thumbs: files.filter(f => f.mime.startsWith("image")).map(f => f.url) });
+  o.log.push({ who: "bot", text: "🤖 Читаю" + (files.length ? " вложение" : "") + "…", wait: true }); save(); render();
+  try { const d = await callAI(text, files.map(f => ({ mime: f.mime, data: f.url.split(",")[1] })), cur ? { kind: cur.kind, params: Object.assign({}, ENG.DEF[cur.kind], cur.params) } : null); o.log = o.log.filter(m => !m.wait); applyAI(o, d, cur); }
+  catch (e) { o.log = o.log.filter(m => !m.wait); if (e.auth) { save(); askCode("Код доступа не подошёл."); return; } o.log.push({ who: "bot", text: "⚠️ " + e.message + (files.length ? "" : "\n\nМожно выбрать изделие и заполнить форму:"), choose: !files.length }); }
+  o.log.forEach(m => { if (m.thumbs) m.thumbs = m.thumbs.map(u => u.length > 60000 ? "" : u).filter(Boolean); }); // не раздуваем хранилище
+  save(); render();
+}
+document.addEventListener("click", e => {
+  if (e.target.closest("#aiPill")) { if (TG_INIT) { alertMsg("ИИ включён: вход через Telegram."); return; } askCode(aiReady() ? "ИИ уже включён. Можно ввести другой код." : ""); return; }
+  if (e.target.closest("#clip")) { if (!aiReady()) { askCode("Читать эскизы, фото и PDF умеет только ИИ."); return; } $("#file").click(); return; }
+  const u = e.target.closest("[data-unattach]"); if (u) { PENDING.splice(+u.dataset.unattach, 1); renderAttach(); return; }
+  const c = e.target.closest("[data-aicodeok]"); if (c) { const v = c.parentElement.querySelector("input").value.trim(); if (!v) return; AI_CODE = v; try { localStorage.setItem("maf-ai-code", v); } catch (er) {} const o = obj(); o.log = o.log.filter(m => !m.aicode); o.log.push({ who: "bot", text: "🤖 Код сохранён. Пишите задание свободным текстом или приложите эскиз 📎. Если код неверный, я попрошу его ещё раз." }); save(); render(); aiPillRender(); }
+});
+document.addEventListener("change", e => { if (e.target.id === "file") { addFiles(e.target.files); e.target.value = ""; } });
+document.addEventListener("paste", e => { const fs = [...(e.clipboardData || {}).files || []].filter(f => f.type.startsWith("image/") || f.type === "application/pdf"); if (fs.length && aiReady()) { e.preventDefault(); addFiles(fs); } });
 
 // ---------- шаблонные формы: если фраза понята не полностью — показать форму с тем, чего не хватает
 const FORM = {
@@ -1262,7 +1346,7 @@ function render() {
   const o = obj(), sp = spec();
   $("#objects").innerHTML = S.objects.map(x => `<button class="item ${x.id === S.cur ? "on" : ""}" data-o="${x.id}">${esc(x.title)}<small>версий: ${x.versions.length}</small></button>`).join("") || '<p class="note">Пока пусто</p>';
   $("#versions").innerHTML = o ? o.versions.map((v, i) => `<button class="item ${i === o.v ? "on" : ""}" data-v="${i}">v${i + 1}<small>${esc(ENG.build(v.kind, v.params).title)}</small></button>`).join("") : "";
-  $("#log").innerHTML = o ? o.log.map((m, mi) => `<div class="msg ${m.who}${m.form ? " hasform" : ""}">${esc(m.text)}${m.choose ? `<div class="acts kinds">${KIND_BTN.map(([k, n]) => `<button data-fk="${k}">${n}</button>`).join("")}${m.formcur ? `<button data-formcur>📝 Форма текущего</button>` : ""}</div>` : ""}${m.form ? formHTML(m, mi) : ""}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button><button data-file="sb">⬇ DXF для КОМПАС</button><button data-formcur>📝 Форма</button></div>` : ""}</div>`).join("") : "";
+  $("#log").innerHTML = o ? o.log.map((m, mi) => `<div class="msg ${m.who}${m.form ? " hasform" : ""}">${esc(m.text)}${(m.thumbs || []).length ? `<div class="thumbs">${m.thumbs.map(u => `<img src="${u}" alt="вложение">`).join("")}</div>` : ""}${m.aicode ? `<div class="aibox"><input type="password" placeholder="Код доступа" autocomplete="off" aria-label="Код доступа"><button type="button" class="btn" data-aicodeok>OK</button></div>` : ""}${m.choose ? `<div class="acts kinds">${KIND_BTN.map(([k, n]) => `<button data-fk="${k}">${n}</button>`).join("")}${m.formcur ? `<button data-formcur>📝 Форма текущего</button>` : ""}</div>` : ""}${m.form ? formHTML(m, mi) : ""}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button><button data-file="sb">⬇ DXF для КОМПАС</button><button data-formcur>📝 Форма</button></div>` : ""}</div>`).join("") : "";
   $("#log").scrollTop = 1e9;
   prod = sp ? ENG.build(sp.kind, sp.params) : null;
   if (prod) {
@@ -1302,7 +1386,8 @@ function alertMsg(t) { obj().log.push({ who: "bot", text: t }); render(); }
 $("#pane").addEventListener("change", ev => { const k = ev.target.dataset.pk; if (!k) return; S.prices[k] = parseFloat(ev.target.value) || 0; save(); render(); });
 $("#examples").innerHTML = EXAMPLES.map(([n], i) => `<button class="chip" data-ex="${i}">${n}</button>`).join("");
 
-init3d();
+init3d(); aiPillRender();
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.closest(".aibox")) { e.preventDefault(); e.target.closest(".aibox").querySelector("[data-aicodeok]").click(); } });
 try {
   const m = location.hash.match(/^#spec=(.+)$/);
   if (m) { const sp = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1]))))); if (sp && ENG.DEF[sp.kind]) { newObject(""); addVersion({ kind: sp.kind, params: sp.params || {} }); obj().log.push({ who: "bot", text: "Изделие открыто из Telegram. Файлы для КОМПАС — на вкладке «Чертёж и файлы»." }); tab = "sheet"; save(); } history.replaceState(null, "", location.pathname); }
