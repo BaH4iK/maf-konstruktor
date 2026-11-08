@@ -95,6 +95,16 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
 .msg .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
 .msg .acts button { font-size: 12px; padding: 4px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
 .msg .acts button:hover { border-color: var(--accent); }
+.msg .acts.kinds button { font-size: 13px; padding: 6px 10px; }
+.msg.hasform { max-width: 100%; }
+.fform { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; margin-top: 10px; white-space: normal; }
+.fform .ff { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.fform .ff input, .fform .ff select { font: 14px var(--f-mono, monospace); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit; min-width: 0; }
+.fform .ff.ask span { color: #9a5b00; font-weight: 600; }
+.fform .ff.ask input, .fform .ff.ask select { border-color: #e0a84a; background: #fff8ec; }
+.fform .fbtns { grid-column: 1 / -1; }
+.fform .fsample { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.formdone { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .compose { border-top: 1px solid var(--line); padding: 10px; display: flex; gap: 8px; }
 .compose textarea { flex: 1; resize: none; height: 64px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: var(--paper); }
 .params { padding: 12px; display: grid; gap: 10px; overflow: auto; }
@@ -315,7 +325,7 @@ const LABELS = {
   L: "Длина, мм", W: "Ширина, мм", H: "Высота, мм", D: "Диаметр / глубина, мм", post: "Стойки", beam: "Балки", lamel: "Ламели", lamel_step: "Шаг ламелей, мм",
   lamel_overhang: "Вылет ламелей, мм", posts_along: "Стоек вдоль балки", plate: "Закладная пластина, мм", plate_t: "Толщина пластины, мм",
   posts: "Число граней", roof_h: "Высота купола, мм", ring: "Обвязка", rafter: "Стропила", rail_h: "Высота перил, мм (0 — без)", rail: "Перила",
-  depth: "Глубина сиденья, мм", seat_h: "Высота сиденья, мм", support: "Опоры (concrete / metal)", support_w: "Ширина опоры, мм", support_d: "Глубина опоры, мм",
+  depth: "Глубина сиденья, мм", seat_h: "Высота сиденья, мм", support: "Опоры", support_w: "Ширина опоры, мм", support_d: "Глубина опоры, мм",
   support_overhang: "Свес сиденья за опору, мм", slat: "Рейка сиденья", gap: "Зазор между рейками, мм", frame: "Каркас", backrest: "Спинка",
   back_h: "Высота спинки, мм", back_slats: "Реек в спинке", back_tilt: "Наклон спинки, °", max_span: "Пролёт без средней опоры, мм",
   H_front: "Высота спереди, мм", H_back: "Высота сзади, мм", purlin: "Обрешётка", purlin_step: "Шаг обрешётки, мм", overhang: "Свес кровли, мм",
@@ -780,7 +790,9 @@ function send(text) {
   if (!o || (res && !res.changes && cur)) o = newObject("Новый объект");
   o.log.push({ who: "user", text });
   if (!res) {
-    o.log.push({ who: "bot", text: "Не понял, что начертить. Назовите изделие и размеры, например:\n«Пергола 4х3, высота 2,5, стойки 100х100, ламели 80х40 шаг 300»\nили правку к текущему: «стойки 80х80», «добавь спинку»." });
+    o.log.push({ who: "bot", text: cur ? "Не понял правку. Выберите изделие — покажу форму, или поправьте текущее через «📝 Форма»." : "Не понял, что начертить. Выберите изделие — покажу форму для заполнения:", choose: true, formcur: !!cur });
+  } else if (!res.changes && missingCore(res.kind, res.params).length) {
+    pushForm(o, res.kind, res.params, missingCore(res.kind, res.params));
   } else {
     try { ENG.build(res.kind, res.params); } catch (e) { o.log.push({ who: "bot", text: "Ошибка в параметрах: " + e.message }); save(); render(); return; }
     addVersion({ kind: res.kind, params: res.params });
@@ -788,6 +800,89 @@ function send(text) {
   }
   save(); render();
 }
+
+// ---------- шаблонные формы: если фраза понята не полностью — показать форму с тем, чего не хватает
+const FORM = {
+  pergola: ["L", "W", "H", "post", "beam", "lamel", "lamel_step"],
+  rotunda: ["D", "posts", "H", "roof_h", "post", "rail_h"],
+  bench: ["L", "support", "slat", "gap", "backrest", "frame"],
+  canopy: ["L", "W", "H_front", "H_back", "post", "purlin", "purlin_step"],
+  container: ["containers", "volume", "roof", "gate", "slab"],
+  urn: ["W", "D", "H", "legs"],
+  deck: ["shape", "D", "sides", "L", "L2", "W", "H", "slat", "gap", "support"],
+  profile: ["shape", "L", "Wd", "H", "back_tilt", "f", "A", "waves", "slat", "gap"],
+};
+const KIND_BTN = [["pergola", "Пергола"], ["rotunda", "Ротонда"], ["bench", "Скамья"], ["canopy", "Навес"], ["deck", "Настил по контуру"], ["profile", "Кресло / волна / дуга"], ["urn", "Урна"], ["container", "Контейнерная площадка"]];
+const TUBES = ["ПТ 20x20x1.5", "ПТ 40x20x2", "ПТ 40x40x2", "ПТ 50x50x2", "ПТ 60x40x3", "ПТ 60x60x3", "ПТ 80x40x3", "ПТ 80x60x3", "ПТ 80x80x3", "ПТ 100x100x4", "ПТ 120x80x4"];
+const OPTS = { post: TUBES, beam: TUBES, lamel: TUBES, frame: TUBES, rib: TUBES, purlin: TUBES, ring: TUBES, rafter: TUBES, rail: TUBES,
+  slat: ["Брус 88x40", "Брус 58x40", "Брус 38x38"], support: [["concrete", "бетон"], ["metal", "металл"]], volume: [[0.75, "0,75 м³"], [1.1, "1,1 м³"]] };
+function formKeys(kind, p) { // поля, которые имеют смысл при текущей форме
+  let ks = FORM[kind]; const sh = String(p.shape || ENG.DEF[kind].shape || "");
+  if (kind === "deck") ks = ks.filter(k => !({ D: !/^(кру|мног)/.test(sh), sides: !/^мног/.test(sh), L: /^(кру|мног)/.test(sh), W: /^(кру|мног)/.test(sh), L2: !/^трап/.test(sh) }[k]));
+  if (kind === "profile") ks = ks.filter(k => !({ back_tilt: !/^кре/.test(sh), f: !/^дуг/.test(sh), A: !/^вол/.test(sh), waves: !/^вол/.test(sh) }[k]));
+  return ks;
+}
+function missingCore(kind, p) {
+  const sh = String(p.shape || ENG.DEF[kind].shape || "");
+  const core = { pergola: ["L", "W", "H"], rotunda: ["D", "posts", "H"], bench: ["L", "support"], canopy: ["L", "W", "H_front", "H_back"], container: ["containers", "volume"], urn: ["W", "D", "H"],
+    deck: ["shape", ...(/^кру/.test(sh) ? ["D"] : /^мног/.test(sh) ? ["D", "sides"] : /^трап/.test(sh) ? ["L", "L2", "W"] : ["L", "W"])], profile: ["shape", "L"] }[kind] || [];
+  return core.filter(k => p[k] === undefined || p[k] === null || p[k] === "");
+}
+function pushForm(o, kind, params, ask, edit) {
+  o.log.push({ who: "bot", text: edit ? `📝 ${ENG.KIND_TITLE[kind]} — основные параметры. Исправьте и нажмите «Построить»:` : ask.length && Object.keys(params).length ? `Понял: ${ENG.KIND_TITLE[kind].toLowerCase()}${understood(kind, params)}. Уточните выделенное (подставлены типовые значения) и нажмите «Построить»:` : `${ENG.KIND_TITLE[kind]} — заполните форму (подставлены типовые значения) и нажмите «Построить»:`, form: { kind, params: Object.assign({}, params), ask, edit: !!edit } });
+}
+function understood(kind, p) { const ks = Object.keys(p).filter(k => k !== "shape" || kind === "deck" || kind === "profile"); return ks.length ? " — " + ks.map(k => `${(ENG.LABELS[k] || k).replace(/,.*$/, "").toLowerCase()} ${optLabel(k, p[k])}`).join(", ") : ""; }
+function optLabel(k, v) { const o = OPTS[k]; if (o && Array.isArray(o[0])) { const f = o.find(x => String(x[0]) === String(v)); if (f) return f[1]; } return typeof v === "boolean" ? (v ? "да" : "нет") : v; }
+function fieldHTML(mi, kind, k, v, hl) {
+  const id = `ff-${mi}-${k}`, lab = ENG.LABELS[k] || k, def = ENG.DEF[kind][k]; let inp;
+  if (k === "shape") inp = `<select id="${id}" data-ff="${k}" data-fm="${mi}" data-shape="1">${ENG.SHAPES[kind].map(o => `<option ${String(v) === o ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+  else if (typeof def === "boolean") inp = `<select id="${id}" data-ff="${k}"><option value="true" ${v === true || v === "true" ? "selected" : ""}>да</option><option value="false" ${!(v === true || v === "true") ? "selected" : ""}>нет</option></select>`;
+  else if (OPTS[k]) { const o = OPTS[k].map(x => Array.isArray(x) ? x : [x, x]); if (!o.some(x => String(x[0]) === String(v))) o.unshift([v, v]); inp = `<select id="${id}" data-ff="${k}">${o.map(([val, t]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`; }
+  else inp = `<input id="${id}" data-ff="${k}" inputmode="decimal" value="${esc(v)}">`;
+  return `<label class="ff ${hl ? "ask" : ""}" for="${id}"><span>${esc(lab)}${hl ? " ⟵" : ""}</span>${inp}</label>`;
+}
+function formHTML(m, mi) {
+  const f = m.form; if (f.done) return `<div class="formdone">✔ Построено по форме</div>`;
+  const p = Object.assign({}, ENG.DEF[f.kind], f.params), keys = formKeys(f.kind, p);
+  return `<div class="fform" data-form="${mi}">${keys.map(k => fieldHTML(mi, f.kind, k, p[k], f.ask.includes(k))).join("")}
+    <div class="fbtns"><button type="button" class="btn" data-fsubmit="${mi}">Построить</button></div>
+    <div class="fsample">Образец фразы: <span class="mono">${esc(samplePhrase(f.kind, p))}</span></div></div>`;
+}
+const dimsOf = code => (String(code).match(/(\d+(?:[.,]\d+)?)x(\d+(?:[.,]\d+)?)/) || []).slice(1, 3).join("х");
+const mtr = v => String(+(v / 1000).toFixed(2)).replace(".", ",");
+function samplePhrase(kind, p) {
+  switch (kind) {
+    case "pergola": return `Пергола ${mtr(p.L)}х${mtr(p.W)}, высота ${mtr(p.H)}, стойки ${dimsOf(p.post)}, ламели ${dimsOf(p.lamel)} шаг ${p.lamel_step}`;
+    case "rotunda": return `Ротонда ${p.posts} граней диаметр ${mtr(p.D)} высота ${mtr(p.H)} купол ${mtr(p.roof_h)}${+p.rail_h ? "" : ", без перил"}`;
+    case "bench": return `Скамья ${p.L} ${p.support === "concrete" ? "на бетонных опорах" : "на металлическом каркасе"}${p.backrest === true || p.backrest === "true" ? " со спинкой" : ""}, рейки ${dimsOf(p.slat)}, зазор ${p.gap}`;
+    case "canopy": return `Навес ${mtr(p.L)}х${mtr(p.W)}, спереди ${mtr(p.H_front)}, сзади ${mtr(p.H_back)}, обрешётка ${dimsOf(p.purlin)} шаг ${p.purlin_step}`;
+    case "container": return `Площадка под ${p.containers} контейнера ${String(p.volume).replace(".", ",")}${p.roof === true || p.roof === "true" ? " с крышей" : " без крыши"}${p.gate === true || p.gate === "true" ? ", с калиткой" : ""}`;
+    case "urn": return `Урна ${p.W}х${p.D}х${p.H}${p.legs === false || p.legs === "false" ? " без ножек" : ""}`;
+    case "deck": { const sh = String(p.shape); const sz = /^кру/.test(sh) ? `диаметр ${mtr(p.D)}` : /^мног/.test(sh) ? `${p.sides} граней диаметр ${mtr(p.D)}` : /^трап/.test(sh) ? `основание ${p.L} верх ${p.L2} ширина ${p.W}` : `${p.L}х${p.W}`; return `Настил ${sh} ${sz} высота ${p.H}, доска ${dimsOf(p.slat)}, зазор ${p.gap}${p.support === "concrete" ? ", на бетоне" : ""}`; }
+    case "profile": { const sh = String(p.shape); return /^кре/.test(sh) ? `Кресло по профилю ${p.L}, наклон спинки ${p.back_tilt}, рейки ${dimsOf(p.slat)}` : /^шез/.test(sh) ? `Шезлонг ${p.L}, рейки ${dimsOf(p.slat)}` : /^дуг/.test(sh) ? `Скамья дуга ${p.L} глубина ${p.Wd} прогиб ${p.f}` : `Скамья-волна длина ${p.L} глубина ${p.Wd} амплитуда ${p.A}`; }
+  }
+  return "";
+}
+function readForm(mi) {
+  const box = document.querySelector(`[data-form="${mi}"]`), m = obj().log[mi], f = m.form, params = Object.assign({}, f.params);
+  box.querySelectorAll("[data-ff]").forEach(el => { let v = el.value; if (v === "true" || v === "false") v = v === "true"; else if (/^-?\d+([.,]\d+)?$/.test(v)) v = parseFloat(v.replace(",", ".")); params[el.dataset.ff] = v; });
+  return params;
+}
+document.addEventListener("click", e => {
+  const k = e.target.closest("[data-fk]"); if (k) { let o = obj(); if (!o || spec()) o = newObject("Новый объект"); pushForm(o, k.dataset.fk, {}, missingCore(k.dataset.fk, {})); save(); render(); return; }
+  const c = e.target.closest("[data-formcur]"); if (c) { const sp = spec(); if (!sp) return; pushForm(obj(), sp.kind, sp.params, [], true); save(); render(); return; }
+  const b = e.target.closest("[data-fsubmit]"); if (!b) return;
+  const mi = +b.dataset.fsubmit, o = obj(), m = o.log[mi], params = readForm(mi);
+  try { ENG.build(m.form.kind, params); } catch (err) { alertMsg("Ошибка в параметрах: " + err.message); return; }
+  const prev = spec(), changes = prev && prev.kind === m.form.kind ? Object.keys(params).filter(x => String(params[x]) !== String(prev.params[x] ?? ENG.DEF[prev.kind][x])).map(x => `${ENG.LABELS[x] || x}: ${optLabel(x, prev.params[x] ?? ENG.DEF[prev.kind][x])} → ${optLabel(x, params[x])}`) : null;
+  m.form.done = true; addVersion({ kind: m.form.kind, params });
+  o.log.push({ who: "bot", text: botReply(spec(), changes && changes.length ? changes : null) + `\n\nВ следующий раз можно одной строкой:\n«${samplePhrase(m.form.kind, Object.assign({}, ENG.DEF[m.form.kind], params))}»`, acts: true });
+  save(); render();
+});
+document.addEventListener("change", e => { // смена формы (круг → трапеция) — перестроить поля
+  const el = e.target.closest("[data-shape]"); if (!el) return; const mi = +el.dataset.fm, m = obj().log[mi];
+  m.form.params = readForm(mi); m.form.ask = missingCore(m.form.kind, m.form.params).concat(m.form.ask.filter(x => x !== "shape")); save(); render();
+});
 
 // ---------- 3D
 let R3 = null;
@@ -1125,6 +1220,7 @@ function renderTabs() { $("#tabs").innerHTML = TABS.map(([k, n]) => `<button cla
 function renderPane() {
   const pane = $("#pane"), is3d = tab === "3d";
   $("#v3d").style.display = is3d ? "" : "none"; $("#hint").style.display = is3d ? "" : "none"; $("#zoom3d").style.display = is3d ? "" : "none"; pane.hidden = is3d;
+  if (!prod && !is3d) { pane.innerHTML = '<p class="note">Изделие ещё не построено — заполните форму в диалоге и нажмите «Построить».</p>'; return; }
   if (is3d || !prod) return;
   if (tab === "sheet") pane.innerHTML = (platesDXF(prod) ? FILES_BAR : FILES_BAR.replace(/<button[^>]*data-file="plates"[^>]*>[^<]*<\/button>/, "")) + DRAWBAR() + zoomBox(`<div class="sheet">${sheetSVG(prod)}</div>`, "sheet");
   if (tab === "sheet") { SNAP = null; wireDrawing(); }
@@ -1156,6 +1252,7 @@ function renderParams() {
   box.innerHTML = `<p class="note">${ENG.KIND_TITLE[sp.kind]} · правка любого поля создаёт новую версию.</p>` + Object.keys(ENG.DEF[sp.kind]).map(k => {
     const v = p[k], id = "par-" + k;
     if (k === "shape" && ENG.SHAPES[sp.kind]) return `<label for="${id}">${ENG.LABELS[k]}<select id="${id}" data-k="${k}">${ENG.SHAPES[sp.kind].map(o => `<option ${String(v) === o ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+    if (OPTS[k]) { const o = OPTS[k].map(x => Array.isArray(x) ? x : [x, x]); if (!o.some(x => String(x[0]) === String(v))) o.unshift([v, v]); return `<label for="${id}">${ENG.LABELS[k] || k}<select id="${id}" data-k="${k}">${o.map(([val, t]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`; }
     if (typeof ENG.DEF[sp.kind][k] === "boolean") return `<label for="${id}">${ENG.LABELS[k] || k}<select id="${id}" data-k="${k}"><option value="true" ${v === true || v === "true" ? "selected" : ""}>да</option><option value="false" ${!(v === true || v === "true") ? "selected" : ""}>нет</option></select></label>`;
     return `<label for="${id}">${ENG.LABELS[k] || k}<input id="${id}" data-k="${k}" value="${esc(v)}"></label>`;
   }).join("");
@@ -1164,7 +1261,7 @@ function render() {
   const o = obj(), sp = spec();
   $("#objects").innerHTML = S.objects.map(x => `<button class="item ${x.id === S.cur ? "on" : ""}" data-o="${x.id}">${esc(x.title)}<small>версий: ${x.versions.length}</small></button>`).join("") || '<p class="note">Пока пусто</p>';
   $("#versions").innerHTML = o ? o.versions.map((v, i) => `<button class="item ${i === o.v ? "on" : ""}" data-v="${i}">v${i + 1}<small>${esc(ENG.build(v.kind, v.params).title)}</small></button>`).join("") : "";
-  $("#log").innerHTML = o ? o.log.map(m => `<div class="msg ${m.who}">${esc(m.text)}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button><button data-file="sb">⬇ DXF для КОМПАС</button></div>` : ""}</div>`).join("") : "";
+  $("#log").innerHTML = o ? o.log.map((m, mi) => `<div class="msg ${m.who}${m.form ? " hasform" : ""}">${esc(m.text)}${m.choose ? `<div class="acts kinds">${KIND_BTN.map(([k, n]) => `<button data-fk="${k}">${n}</button>`).join("")}${m.formcur ? `<button data-formcur>📝 Форма текущего</button>` : ""}</div>` : ""}${m.form ? formHTML(m, mi) : ""}${m.acts ? `<div class="acts"><button data-go="3d">3D</button><button data-go="sheet">Чертёж</button><button data-go="spec">Спецификация</button><button data-go="cut">Раскрой</button><button data-go="cost">Смета</button><button data-file="sb">⬇ DXF для КОМПАС</button><button data-formcur>📝 Форма</button></div>` : ""}</div>`).join("") : "";
   $("#log").scrollTop = 1e9;
   prod = sp ? ENG.build(sp.kind, sp.params) : null;
   if (prod) {
@@ -1172,6 +1269,9 @@ function render() {
     $("#summary").innerHTML = `<div class="kpi"><b>${esc(prod.title)}</b></div><div class="kpi"><b>${fmt(t.total, 1)}</b><span>кг</span></div><div class="kpi"><b>${t.parts}</b><span>деталей</span></div><div class="kpi"><b>${fmt(e.price)}</b><span>₽ ориентир</span></div><div class="kpi"><b>${fmt(e.cost)}</b><span>₽ себестоимость</span></div>`;
     $("#asm").innerHTML = prod.asm.map(a => `<li>${esc(a)}</li>`).join("");
     draw3d(prod);
+  } else {
+    if (R3) while (R3.group.children.length) { const c = R3.group.children.pop(); c.geometry && c.geometry.dispose(); }
+    $("#summary").innerHTML = `<div class="kpi"><b>${o ? "Заполните форму в диалоге" : "Нет объекта"}</b></div>`; $("#asm").innerHTML = "";
   }
   renderTabs(); renderPane(); renderParams();
 }
