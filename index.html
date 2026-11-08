@@ -68,6 +68,11 @@ main { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; min-widt
 .zoomwrap { overflow: auto; max-height: 75vh; border-radius: 4px; touch-action: pan-x pan-y pinch-zoom; }
 .zoomwrap .sheet, .zoomwrap img { max-width: none; margin: 0; }
 .zfig { position: relative; }
+.drawbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.drawbar .btn { padding: 6px 10px; font-size: 13px; }
+.drawhint { font-size: 12px; color: var(--muted); margin-left: 4px; }
+.files .sh { display: none; }
+@media (max-width: 700px) { .drawbar .tl, .drawhint { display: none; } .drawbar .btn { padding: 6px 12px; font-size: 18px; } .files { gap: 6px; } .files b { display: none; } .files .lg { display: none; } .files .sh { display: inline !important; } .files .btn { padding: 6px 10px; font-size: 13px; } main { grid-template-rows: auto 68vh auto !important; } .pane { padding: 10px; } }
 .sheet { background: #fff; border: 1px solid var(--line); border-radius: 4px; max-width: 1100px; margin: 0 auto; }
 .sheet svg { display: block; width: 100%; height: auto; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -244,8 +249,8 @@ function corners(e) {
   let p0, p1, hw, hh;
   if (isBoxKind(s.kind)) { const [sx, sy, sz] = boxSize(e); p0 = e.start; p1 = add(p0, mul(a, sz)); hw = sx / 2; hh = sy / 2; }
   else { p0 = e.start; p1 = e.end; hw = s.w / 2; hh = s.h / 2; }
-  const out = [];
-  for (const p of [p0, p1]) for (const [sw, sh] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) out.push(add(add(p, mul(w, sw * hw)), mul(h, sh * hh)));
+  const out = [], c = e.cut;
+  [p0, p1].forEach((p, k) => { for (const [sw, sh] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { let q = add(add(p, mul(w, sw * hw)), mul(h, sh * hh)); if (c) q = add(q, mul(a, (k ? -1 : 1) * c[k * 2 + (sw > 0 ? 1 : 0)])); out.push(q); } });
   return out;
 }
 function mass(e) {
@@ -262,10 +267,23 @@ function paint(e) {
   return perim(s) * elLen(e) * 1e-6;
 }
 
+function pieceLen(prod, id) { return prod.elements.filter(x => x.piece === id).reduce((a, x) => a + elLen(x), 0); }
 function positions(prod) {
-  const groups = new Map();
+  const groups = new Map(), seen = new Set();
   for (const e of prod.elements) {
     const s = info(e); let key, dims;
+    if (e.piece) {
+      const segs = prod.elements.filter(x => x.piece === e.piece); if (seen.has(e.piece)) { e._pos = null; continue; } seen.add(e.piece);
+      const Lp = Math.round(pieceLen(prod, e.piece)); key = [e.name, s.code, Lp, "bent"].join("|");
+      if (!groups.has(key)) groups.set(key, { name: e.name, profile: s.code, gost: s.gost, mat: s.mat, kind: s.kind, dims: `L=${Lp} (развёртка, гнуть по шаблону)`, length: Lp, qty: 0, mass1: segs.reduce((a, x) => a + mass(x), 0), vol1: segs.reduce((a, x) => a + volume(x), 0), els: [], segs: [] });
+      const gr = groups.get(key); gr.qty++; gr.els.push(e); gr.segs.push(...segs); continue;
+    }
+    if (e.cut) {
+      const Lmin = Math.round(elLen(e) - Math.max(e.cut[0], e.cut[1]) - Math.max(e.cut[2], e.cut[3]));
+      key = [e.name, s.code, Math.round(elLen(e)), Lmin].join("|"); dims = Lmin < Math.round(elLen(e)) - 2 ? `L=${Math.round(elLen(e))} / ${Lmin}` : `L=${Math.round(elLen(e))}`;
+      if (!groups.has(key)) groups.set(key, { name: e.name, profile: s.code, gost: s.gost, mat: s.mat, kind: s.kind, dims, length: Math.round(elLen(e)), qty: 0, mass1: mass(e), vol1: volume(e), els: [] });
+      const gr = groups.get(key); gr.qty++; gr.els.push(e); continue;
+    }
     if (isBoxKind(s.kind)) { const [x, y, z] = boxSize(e); key = [e.name, s.code, Math.round(x), Math.round(y), Math.round(z)].join("|"); dims = s.kind === "plate" ? `${Math.round(x)}×${Math.round(y)}` : `${Math.round(x)}×${Math.round(y)}×${Math.round(z)}`; }
     else { key = [e.name, s.code, Math.round(elLen(e))].join("|"); dims = `L=${Math.round(elLen(e))}`; }
     if (!groups.has(key)) groups.set(key, { name: e.name, profile: s.code, gost: s.gost, mat: s.mat, kind: s.kind, dims, length: Math.round(elLen(e)), qty: 0, mass1: mass(e), vol1: volume(e), els: [] });
@@ -273,11 +291,11 @@ function positions(prod) {
   }
   const order = { steel: 0, wood: 1, concrete: 2 };
   const res = [...groups.values()].sort((a, b) => order[a.mat] - order[b.mat] || b.mass1 - a.mass1);
-  res.forEach((gr, i) => { gr.pos = i + 1; gr.mass = gr.mass1 * gr.qty; gr.els.forEach(e => e._pos = gr.pos); });
+  res.forEach((gr, i) => { gr.pos = i + 1; gr.mass = gr.mass1 * gr.qty; gr.els.forEach(e => e._pos = gr.pos); (gr.segs || []).forEach(e => e._pos = gr.pos); });
   return res;
 }
 function totals(prod) {
-  const t = { steel: 0, wood: 0, woodV: 0, conc: 0, concV: 0, paint: 0, parts: prod.elements.length };
+  const t = { steel: 0, wood: 0, woodV: 0, conc: 0, concV: 0, paint: 0, parts: prod.elements.filter(e => !e.piece).length + new Set(prod.elements.filter(e => e.piece).map(e => e.piece)).size };
   for (const e of prod.elements) { const s = info(e), m = mass(e); if (s.mat === "steel") { t.steel += m; t.paint += paint(e); } else if (s.mat === "wood") { t.wood += m; t.woodV += volume(e); } else { t.conc += m; t.concV += volume(e); } }
   t.total = t.steel + t.wood + t.conc; return t;
 }
@@ -290,6 +308,8 @@ const DEF = {
   canopy: { L: 4000, W: 3000, H_front: 2500, H_back: 2200, post: "ПТ 80x80x3", beam: "ПТ 80x60x3", purlin: "ПТ 40x20x2", purlin_step: 600, overhang: 300, posts_along: 2, plate: 200, plate_t: 8 },
   container: { containers: 2, volume: 1.1, H: 1800, frame: "ПТ 50x50x2", rail: "ПТ 40x20x2", sheet: "Профлист С8 0.5", roof: true, slab: true, gate: false },
   urn: { W: 400, D: 400, H: 750, frame: "ПТ 20x20x1.5", side: "Лист 1.5", legs: true, base: "Лист 4" },
+  deck: { shape: "круг", D: 2400, sides: 6, L: 2000, W: 1200, L2: 1000, H: 450, slat: "Брус 88x40", gap: 15, rib: "ПТ 40x40x2", rib_step: 600, support: "metal" },
+  profile: { shape: "кресло", L: 700, Wd: 550, H: 400, f: 120, A: 120, waves: 1, back_h: 650, back_tilt: 22, seat_tilt: 6, slat: "Брус 58x40", gap: 12, rib: "ПТ 40x40x2", rib_step: 600 },
 };
 const LABELS = {
   L: "Длина, мм", W: "Ширина, мм", H: "Высота, мм", D: "Диаметр / глубина, мм", post: "Стойки", beam: "Балки", lamel: "Ламели", lamel_step: "Шаг ламелей, мм",
@@ -301,8 +321,11 @@ const LABELS = {
   H_front: "Высота спереди, мм", H_back: "Высота сзади, мм", purlin: "Обрешётка", purlin_step: "Шаг обрешётки, мм", overhang: "Свес кровли, мм",
   containers: "Контейнеров, шт", volume: "Объём контейнера, м³ (0.75 / 1.1)", sheet: "Обшивка", roof: "Крыша", slab: "Бетонное основание", gate: "Калитка (дверцы)",
   side: "Стенки", legs: "На ножках", base: "Дно",
+  shape: "Форма", sides: "Число граней (многоугольник)", L2: "Верхнее основание трапеции, мм", rib: "Рёбра / лаги", rib_step: "Шаг рёбер, мм (не более)",
+  Wd: "Глубина / развёртка профиля, мм", f: "Прогиб дуги, мм (− выпуклая)", A: "Амплитуда волны, мм", waves: "Число волн", seat_tilt: "Наклон сиденья, °",
 };
-const KIND_TITLE = { pergola: "Пергола", rotunda: "Ротонда", bench: "Скамья", canopy: "Навес", container: "Контейнерная площадка", urn: "Урна" };
+const SHAPES = { deck: ["круг", "многоугольник", "трапеция", "прямоугольник", "капля", "рыба"], profile: ["кресло", "шезлонг", "дуга", "волна"] };
+const KIND_TITLE = { pergola: "Пергола", rotunda: "Ротонда", bench: "Скамья", canopy: "Навес", container: "Контейнерная площадка", urn: "Урна", deck: "Настил по контуру", profile: "Изделие по профилю" };
 
 function merge(kind, params, asm, notes) {
   const p = Object.assign({}, DEF[kind]);
@@ -430,6 +453,125 @@ T.urn = (params) => {
   return { title: `Урна ${W}×${D}×${H}`, params: p, elements: els, asm };
 };
 
+// ---- движок ламелей
+// Тип А: плоскость с фигурным контуром — доски параллельны оси X, у каждой своя длина и углы реза по контуру.
+function contour(p) {
+  const pts = [], sh = String(p.shape || "круг").toLowerCase();
+  if (sh.startsWith("кру")) { const r = p.D / 2; for (let i = 0; i < 96; i++) { const t = 2 * Math.PI * i / 96; pts.push([r * Math.cos(t), r * Math.sin(t)]); } }
+  else if (sh.startsWith("мног")) { const n = Math.max(3, Math.round(+p.sides || 6)), r = p.D / 2, t0 = -Math.PI / 2 - Math.PI / n; for (let i = 0; i < n; i++) { const t = t0 + 2 * Math.PI * i / n; pts.push([r * Math.cos(t), r * Math.sin(t)]); } }
+  else if (sh.startsWith("трап")) { const a = p.L / 2, b = p.L2 / 2, h = p.W / 2; pts.push([-a, -h], [a, -h], [b, h], [-b, h]); }
+  else if (sh.startsWith("кап")) { const r = p.W / 2, cx = p.L / 2 - r, tip = -p.L / 2, ang = Math.acos(Math.min(1, r / (cx - tip))); for (let i = 0; i <= 60; i++) { const t = -(Math.PI - ang) + i * 2 * (Math.PI - ang) / 60; pts.push([cx + r * Math.cos(t), r * Math.sin(t)]); } pts.push([tip, 0]); }
+  else if (sh.startsWith("рыб") || sh.startsWith("кар")) {
+    const L = p.L, W = p.W, nose = 0.5 * L, joint = -0.24 * L, tail = -0.5 * L, bw = W / 2;
+    const body = x => { const u = (x - joint) / (nose - joint); return bw * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2))) * (0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, u * 1.15))); };
+    const up = []; for (let i = 0; i <= 40; i++) { const x = nose - i * (nose - joint) / 40; up.push([x, Math.max(body(x), i === 40 ? bw * 0.18 : 0)]); }
+    const lo = up.map(([x, y]) => [x, -y]).reverse();
+    pts.push(...up, [tail, bw * 0.75], [tail + 0.08 * L, 0], [tail, -bw * 0.75], ...lo.slice(0, -1));
+  }
+  else { const a = p.L / 2, h = p.W / 2; pts.push([-a, -h], [a, -h], [a, h], [-a, h]); }
+  return pts;
+}
+function scan(poly, v, axis) { // пересечения прямой (y=v при axis=1 или x=v при axis=0) с контуром → интервалы
+  const xs = [], o = 1 - axis;
+  for (let i = 0; i < poly.length; i++) { const A = poly[i], B = poly[(i + 1) % poly.length]; if ((A[axis] <= v) !== (B[axis] <= v)) xs.push(A[o] + (v - A[axis]) * (B[o] - A[o]) / (B[axis] - A[axis])); }
+  xs.sort((a, b) => a - b); const iv = []; for (let i = 0; i + 1 < xs.length; i += 2) iv.push([xs[i], xs[i + 1]]); return iv;
+}
+const pick = (ivs, m) => ivs.find(q => q[1] > m[0] && q[0] < m[1]);
+function fasten(prod, boards, ribs, b, kind) { // скрытый крепёж: отверстия в рёбрах по осям досок
+  let cross = 0; const holes = [];
+  ribs.forEach(r => { const list = []; boards.forEach(bd => { const s = r.at(bd); if (s !== null) list.push(Math.round(s)); }); list.sort((x, y) => x - y); cross += list.length; holes.push({ rib: r.el, list }); });
+  const per = b > 100 ? 2 : 1;
+  prod.fasten = { crossings: cross, screws: cross * per, per, holes,
+    note: `Крепёж скрытый: снизу через ребро, саморез ${per > 1 ? "2 шт." : "1 шт."} на пересечение. В ребре: сверху Ø5 под саморез, снизу Ø12 — доступ отвёртки${kind === "profile" ? "; координаты отверстий — по развёртке ребра до гибки" : ""}.` };
+}
+T.deck = (params) => {
+  const asm = [], p = merge("deck", params, asm, ["slat", "gap", "rib"]);
+  const slat = parse(p.slat), rib = parse(p.rib), b = slat.w, pitch = b + p.gap, els = [], poly = contour(p);
+  const ys = poly.map(q => q[1]), xsA = poly.map(q => q[0]), y0 = Math.min(...ys), y1 = Math.max(...ys), x0 = Math.min(...xsA), x1 = Math.max(...xsA);
+  const n = Math.floor((y1 - y0 - 20 + p.gap) / pitch), start = (y0 + y1) / 2 - (n * pitch - p.gap) / 2 + b / 2;
+  const zTop = p.H, zb = zTop - slat.h / 2, boards = []; let dropped = 0;
+  for (let i = 0; i < n; i++) {
+    const yc = start + i * pitch, ya = yc - b / 2, yb = yc + b / 2;
+    for (const m of scan(poly, yc, 1)) {
+      const A = pick(scan(poly, ya + 0.5, 1), m) || m, B = pick(scan(poly, yb - 0.5, 1), m) || m;
+      const xs = Math.min(A[0], B[0]), xe = Math.max(A[1], B[1]), Lmax = xe - xs, Lmin = Math.min(A[1], B[1]) - Math.max(A[0], B[0]);
+      if (Lmin < 100) { dropped++; continue; }
+      const e = El("Доска настила", slat.code, [xs, yc, zb], [xe, yc, zb], { cut: [A[0] - xs, B[0] - xs, xe - A[1], xe - B[1]] });
+      const deg = d => Math.round(Math.atan2(Math.abs(d), b) * 180 / Math.PI);
+      boards.push({ e, y: yc, xs, xe, Lmax: Math.round(Lmax), Lmin: Math.round(Lmin), aL: deg(B[0] - A[0]), aR: deg(B[1] - A[1]) }); els.push(e);
+    }
+  }
+  if (dropped) asm.push(`Крайние доски короче 100 мм не ставятся: ${dropped} шт.`);
+  // рёбра поперёк досок
+  const inset = Math.min(120, (x1 - x0) / 6), span = x1 - x0 - 2 * inset, nr = Math.max(2, Math.ceil(span / p.rib_step) + 1), ribs = [];
+  const zr = zTop - slat.h - rib.h / 2;
+  for (let k = 0; k < nr; k++) {
+    const x = x0 + inset + span * k / (nr - 1);
+    for (const iv of scan(poly, x, 0)) {
+      const ya = iv[0] + 30, yb = iv[1] - 30; if (yb - ya < 150) continue;
+      const e = El("Ребро (лага)", rib.code, [x, ya, zr], [x, yb, zr]); els.push(e);
+      ribs.push({ el: e, at: bd => (x >= bd.xs + 20 && x <= bd.xe - 20 && bd.y > ya && bd.y < yb) ? bd.y - ya : null });
+      if (p.support === "concrete") els.push(El("Опора бетонная", "Бетон М300", [x, (ya + yb) / 2, 0], null, { size: [300, Math.min(600, yb - ya), zr - rib.h / 2] }));
+      else { const lh = zr - rib.h / 2, yl = yb - ya > 1300 ? [ya + 100, (ya + yb) / 2, yb - 100] : [ya + 100, yb - 100]; yl.forEach(y => els.push(El("Ножка", rib.code, [x, y, 0], [x, y, lh]))); }
+    }
+  }
+  const prod = { title: `Настил «${p.shape}» ${String(p.shape).startsWith("кру") || String(p.shape).startsWith("мног") ? "D" + p.D : p.L + "×" + p.W}`, params: p, elements: els, asm };
+  prod.boards = boards.map((bd, i) => ({ no: i + 1, e: bd.e, y: Math.round(bd.y), Lmax: bd.Lmax, Lmin: bd.Lmin, aL: bd.aL, aR: bd.aR }));
+  prod.layoutType = "А";
+  fasten(prod, boards, ribs, b, "deck");
+  asm.push(`Тип А: ${boards.length} досок ${slat.code} параллельно, зазор ${p.gap}, торцы режутся по контуру (углы — в ведомости досок)`);
+  asm.push(`Рёбра ${rib.code}: ${ribs.length} шт., шаг не более ${p.rib_step}; ${p.support === "concrete" ? "на бетонных опорах" : "на металлических ножках"}`);
+  asm.push(prod.fasten.note); asm.push(`Проставки-шаблон зазора ${p.gap} мм — оснастка, ${Math.max(4, ribs.length * 2)} шт.`);
+  return prod;
+};
+// Тип Б: доски одной длины по профильной кривой с постоянным шагом
+function profileCurve(p) {
+  const sh = String(p.shape || "кресло").toLowerCase(), pts = []; let legs = [];
+  const fillet = (P0, P1, P2, R) => { const d1 = norm2(sub2(P0, P1)), d2 = norm2(sub2(P2, P1)), a = add2(P1, mul2(d1, R)), c = add2(P1, mul2(d2, R)), out = []; for (let i = 0; i <= 8; i++) { const t = i / 8; out.push(add2(add2(mul2(a, (1 - t) * (1 - t)), mul2(P1, 2 * t * (1 - t))), mul2(c, t * t))); } return out; };
+  if (sh.startsWith("дуг")) { const c = p.Wd, f = +p.f || 1, R = (c * c / 4 + f * f) / (2 * Math.abs(f)); for (let i = 0; i <= 30; i++) { const y = -c / 2 + c * i / 30; pts.push([y, p.H - f + Math.sign(f) * (R - Math.sqrt(Math.max(0, R * R - y * y)))]); } legs = c > 1500 ? [-c / 2 + 80, 0, c / 2 - 80] : [-c / 2 + 80, c / 2 - 80]; }
+  else if (sh.startsWith("вол")) { const c = p.Wd; for (let i = 0; i <= 48; i++) { const y = c * i / 48; pts.push([y - c / 2, p.H + p.A * Math.sin(2 * Math.PI * p.waves * y / c)]); } legs = c > 1500 ? [-c / 2 + 80, 0, c / 2 - 80] : [-c / 2 + 80, c / 2 - 80]; }
+  else {
+    const lounger = sh.startsWith("шез"), sd = lounger ? Math.max(p.Wd, 1000) : p.Wd, st = (lounger ? 4 : p.seat_tilt) * Math.PI / 180, bt = (lounger ? 50 : p.back_tilt) * Math.PI / 180;
+    const P0 = [0, p.H], P1 = [sd * Math.cos(st), p.H - sd * Math.sin(st)], P2 = [P1[0] + p.back_h * Math.sin(bt), P1[1] + p.back_h * Math.cos(bt)];
+    const Pf = [-60, p.H - 50];
+    pts.push(...fillet(Pf, P0, P1, 50)); const R = Math.min(160, sd / 4, p.back_h / 4); pts.push(...fillet(P0, P1, P2, R)); pts.push(P2);
+    legs = [60, P1[0] - 40];
+  }
+  return { pts, legs };
+}
+const sub2 = (a, b) => [a[0] - b[0], a[1] - b[1]], add2 = (a, b) => [a[0] + b[0], a[1] + b[1]], mul2 = (a, k) => [a[0] * k, a[1] * k], norm2 = a => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; };
+function arcParam(pts) { const s = [0]; for (let i = 1; i < pts.length; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return s; }
+function atS(pts, S, s) { let i = 1; while (i < pts.length - 1 && S[i] < s) i++; const t = (s - S[i - 1]) / ((S[i] - S[i - 1]) || 1), P = add2(pts[i - 1], mul2(sub2(pts[i], pts[i - 1]), t)), d = norm2(sub2(pts[i], pts[i - 1])); return { P, d, n: [-d[1], d[0]] }; }
+T.profile = (params) => {
+  if (!params.L && /^(дуг|вол)/.test(String(params.shape || ""))) params = Object.assign({}, params, { L: 1800 });
+  const asm = [], p = merge("profile", params, asm, ["slat", "gap", "rib"]);
+  const slat = parse(p.slat), rib = parse(p.rib), b = slat.w, pitch = b + p.gap, els = [], { pts, legs } = profileCurve(p), S = arcParam(pts), Ltot = S[S.length - 1];
+  const nb = Math.max(1, Math.floor((Ltot - 20 + p.gap) / pitch)), s0 = (Ltot - (nb * pitch - p.gap)) / 2 + b / 2, layout = [];
+  for (let i = 0; i < nb; i++) {
+    const s = s0 + i * pitch, { P, d, n } = atS(pts, S, s), up = n[1] >= 0 ? n : mul2(n, -1), c = add2(P, mul2(up, slat.h / 2));
+    const ang = Math.atan2(d[1], d[0]) * 180 / Math.PI;
+    const e = El("Доска", slat.code, [0, c[0], c[1]], [p.L, c[0], c[1]], { roll: ang }); els.push(e);
+    layout.push({ no: i + 1, e, s: Math.round(s), y: Math.round(c[0]), z: Math.round(c[1]), ang: Math.round(ang) });
+  }
+  // рёбра — гнутая труба по кривой (сегменты одной детали)
+  const inset = Math.min(80, p.L / 6), nr = Math.max(2, Math.ceil((p.L - 2 * inset) / p.rib_step) + 1), ribs = [], step = Math.max(60, Ltot / 24);
+  const ribPts = []; for (let s = 0; s <= Ltot + 1e-6; s += step) { const { P, n } = atS(pts, S, Math.min(s, Ltot)), up = n[1] >= 0 ? n : mul2(n, -1); ribPts.push(add2(P, mul2(up, -rib.h / 2))); }
+  if (Math.hypot(...sub2(ribPts[ribPts.length - 1], add2(pts[pts.length - 1], [0, -rib.h / 2]))) > 5) { const { P, n } = atS(pts, S, Ltot), up = n[1] >= 0 ? n : mul2(n, -1); ribPts.push(add2(P, mul2(up, -rib.h / 2))); }
+  for (let k = 0; k < nr; k++) {
+    const x = inset + (p.L - 2 * inset) * k / (nr - 1), id = "rib" + k; let first = null;
+    for (let i = 0; i + 1 < ribPts.length; i++) { if (Math.hypot(...sub2(ribPts[i + 1], ribPts[i])) < 1) continue; const e = El("Ребро гнутое", rib.code, [x, ...ribPts[i]], [x, ...ribPts[i + 1]], { piece: id }); if (!first) first = e; els.push(e); }
+    ribs.push({ el: first, at: bd => bd.s });
+    // ножки
+    legs.forEach(y => { let j = 1; while (j < ribPts.length - 1 && ribPts[j][0] < y) j++; const A = ribPts[j - 1], B = ribPts[j], t = Math.min(1, Math.max(0, (y - A[0]) / ((B[0] - A[0]) || 1))), z = A[1] + (B[1] - A[1]) * t - rib.h / 2; if (z > 60) els.push(El("Ножка", rib.code, [x, y, 0], [x, y, z])); });
+  }
+  legs.forEach(y => els.push(El("Связь", rib.code, [inset, y, 150], [p.L - inset, y, 150])));
+  const prod = { title: `${{ кресло: "Кресло", шезлонг: "Шезлонг", дуга: "Скамья-дуга", волна: "Скамья-волна" }[String(p.shape).toLowerCase()] || "Изделие"} по профилю ${p.L}`, params: p, elements: els, asm };
+  prod.layout = layout.map(l => ({ no: l.no, e: l.e, s: l.s, y: l.y, z: l.z, ang: l.ang })); prod.layoutType = "Б"; prod.curveLen = Math.round(Ltot);
+  fasten(prod, layout, ribs, b, "profile");
+  asm.push(`Тип Б: ${nb} досок ${slat.code} длиной ${p.L}, шаг по кривой ${pitch} (доска ${b} + зазор ${p.gap}), развёртка профиля ${Math.round(Ltot)} мм`);
+  asm.push(`Рёбра ${rib.code}: ${nr} шт., гнутые по шаблону профиля`); asm.push(prod.fasten.note);
+  return prod;
+};
 function build(kind, params) {
   const r = T[kind](params || {});
   r.kind = kind; r.elements.forEach(e => { if (info(e).kind === "plate" && e.size && e.size[2] > 20) { e._s = Object.assign({}, info(e), { kind: "sheet", kgm2: info(e).t * 7.85 }); } });
@@ -448,8 +590,8 @@ function ripBoard(sec) {
 function ffd(parts, stock, kerf) {
   parts = [...parts].sort((a, b) => b.L - a.L); const bars = [];
   for (const p of parts) {
-    if (p.L > stock) { const n = Math.ceil(p.L / stock); for (let k = 0; k < n; k++) bars.push({ cuts: [{ L: Math.min(stock, p.L - k * stock), pos: p.pos, note: `стык ${k + 1}/${n}` }], used: Math.min(stock, p.L - k * stock) }); continue; }
-    const b = bars.find(b => b.used + kerf + p.L <= stock && !b.cuts.some(c => c.note));
+    if (p.L > stock) { const n = Math.ceil(p.L / stock); for (let k = 0; k < n; k++) bars.push({ cuts: [{ L: Math.min(stock, p.L - k * stock), pos: p.pos, note: `стык ${k + 1}/${n}`, j: 1 }], used: Math.min(stock, p.L - k * stock) }); continue; }
+    const b = bars.find(b => b.used + kerf + p.L <= stock && !b.cuts.some(c => c.j));
     if (b) { b.cuts.push(p); b.used += kerf + p.L; } else bars.push({ cuts: [p], used: p.L });
   }
   bars.forEach(b => b.rest = Math.round(stock - b.used));
@@ -458,7 +600,12 @@ function ffd(parts, stock, kerf) {
 }
 function cutting(prod) {
   positions(prod); const by = new Map();
-  for (const e of prod.elements) { const s = info(e); if (isBoxKind(s.kind)) continue; if (!by.has(s.code)) by.set(s.code, []); by.get(s.code).push({ L: Math.round(elLen(e)), pos: e._pos }); }
+  const done = new Set();
+  for (const e of prod.elements) {
+    const s = info(e); if (isBoxKind(s.kind)) continue; if (!by.has(s.code)) by.set(s.code, []);
+    if (e.piece) { if (done.has(e.piece)) continue; done.add(e.piece); by.get(s.code).push({ L: Math.round(pieceLen(prod, e.piece)), pos: e._pos, note: "гнутая" }); continue; }
+    by.get(s.code).push({ L: Math.round(elLen(e)), pos: e._pos });
+  }
   const res = [];
   for (const [code, parts] of by) {
     const sec = parse(code), wood = sec.mat === "wood", rip = wood ? ripBoard(sec) : null;
@@ -497,7 +644,7 @@ function estimate(prod, pr = PRICES) {
 }
 
 // ---- разбор текста (без ИИ)
-const KINDS = [["pergola", ["пергол"]], ["rotunda", ["ротонд", "беседк"]], ["container", ["контейнер", "мусорн", "площадк"]], ["urn", ["урн"]], ["bench", ["скам", "лавк", "лавоч"]], ["canopy", ["навес"]]];
+const KINDS = [["pergola", ["пергол"]], ["rotunda", ["ротонд", "беседк"]], ["profile", ["шезлонг", "кресл", "волн", "по профилю", "дугов", "гнут", "изогнут", "скамья-дуга", "скамья дуга"]], ["deck", ["настил", "по контуру", "кругл", "трапец", "рыб", "карас", "капл", "многоугольн"]], ["container", ["контейнер", "мусорн", "площадк"]], ["urn", ["урн"]], ["bench", ["скам", "лавк", "лавоч"]], ["canopy", ["навес"]]];
 const NUM = "(\\d+(?:[.,]\\d+)?)", X = "\\s*[xх×*]\\s*", XP = "(?:\\s*[xх×*]\\s*|\\s+на\\s+)";
 const f = s => parseFloat(s.replace(",", "."));
 const mm = (v, smallM = true) => smallM && v < 30 ? Math.round(v * 1000) : Math.round(v);
@@ -520,15 +667,30 @@ function profAfter(t, words, wood) {
 function numAfter(t, words) { for (const w of words) { const m = t.match(new RegExp(w + "[а-яё]*\\s*(?:[=:-]|до)?\\s*" + NUM)); if (m) return f(m[1]); } return null; }
 function parseText(text, kind) {
   const t = " " + text.toLowerCase().replace(/ё/g, "е") + " "; kind = detect(t) || kind; const p = {};
-  if (["pergola", "canopy"].includes(kind)) {
+  if (["pergola", "canopy", "deck"].includes(kind)) {
     const m = t.match(new RegExp("(?<![\\d.,])" + NUM + "(?:" + X + "|\\s+на\\s+)" + NUM + "(?:\\s*м(?![а-я]))?(?!" + X + ")"));
     if (m) { const before = t.slice(Math.max(0, m.index - 14), m.index); if (!/(стойк|балк|ламел|брус|доск|труб|пт|обреш|стропил|уголок|каркас)/.test(before)) { p.L = mm(f(m[1])); p.W = mm(f(m[2])); } }
   }
   let v;
   if ((v = numAfter(t, ["длин"]))) p.L = mm(v);
-  if ((v = numAfter(t, ["ширин"]))) p[kind === "bench" ? "depth" : "W"] = mm(v);
-  if ((v = numAfter(t, ["высот"]))) p[{ bench: "seat_h", canopy: "H_front" }[kind] || "H"] = mm(v);
-  if ((v = numAfter(t, ["диаметр", " d", "ø", " д"])) && kind === "rotunda") p.D = mm(v);
+  if ((v = numAfter(t, ["ширин"]))) p[kind === "bench" ? "depth" : kind === "profile" ? "Wd" : "W"] = mm(v);
+  if ((v = numAfter(t, ["высот"])) && !/высот[а-я]*\s+волн/.test(t)) p[{ bench: "seat_h", canopy: "H_front" }[kind] || "H"] = mm(v);
+  if ((v = numAfter(t, ["диаметр", " d", "ø", " д"])) && (kind === "rotunda" || kind === "deck")) p.D = mm(v);
+  if (kind === "deck") {
+    if (/кругл|круг /.test(t)) p.shape = "круг"; else if (/трапец/.test(t)) p.shape = "трапеция"; else if (/рыб|карас/.test(t)) p.shape = "рыба"; else if (/капл/.test(t)) p.shape = "капля"; else if (/прямоуг/.test(t)) p.shape = "прямоугольник"; else if (/гран|многоуг|угольн/.test(t)) p.shape = "многоугольник";
+    if ((v = numAfter(t, ["верх", "верхн", "меньш"]))) { p.L2 = mm(v); p.shape = "трапеция"; }
+    if ((v = numAfter(t, ["основани", "низ"])) && p.shape === "трапеция") p.L = mm(v);
+  }
+  if (kind === "profile") {
+    if (/шезлонг/.test(t)) p.shape = "шезлонг"; else if (/кресл/.test(t)) p.shape = "кресло"; else if (/волн/.test(t)) p.shape = "волна"; else if (/дуг|гнут|изогнут/.test(t)) p.shape = "дуга";
+    if ((v = numAfter(t, ["глубин", "развертк"]))) p.Wd = mm(v);
+    if ((v = numAfter(t, ["прогиб", "стрел"]))) p.f = mm(v, false);
+    if ((v = numAfter(t, ["амплитуд", "высот[а-я]* волн"]))) p.A = mm(v, false);
+    let wv = t.match(/(\d+)\s*волн/); if (wv) p.waves = +wv[1];
+    if ((v = numAfter(t, ["наклон спинки", "наклон"]))) p.back_tilt = v;
+    if ((v = numAfter(t, ["спинк"])) && v > 100) p.back_h = mm(v, false);
+    if (kind === "profile" && !p.L) { const m = t.match(new RegExp("(?:кресл|шезлонг|скам|профил|дуг|волн)[а-я-]*\\s+" + NUM)); if (m) p.L = mm(f(m[1])); }
+  }
   if ((v = numAfter(t, ["купол"])) && kind === "rotunda") p.roof_h = mm(v);
   if ((v = numAfter(t, ["спереди"])) && kind === "canopy") p.H_front = mm(v);
   if ((v = numAfter(t, ["сзади"])) && kind === "canopy") p.H_back = mm(v);
@@ -538,17 +700,20 @@ function parseText(text, kind) {
   const WORDN = { "четырех": 4, "пяти": 5, "шести": 6, "семи": 7, "восьми": 8, "девяти": 9, "десяти": 10, "двенадцати": 12 };
   const wm = t.match(/(четырех|пяти|шести|семи|восьми|девяти|десяти|двенадцати)\s*-?\s*(?:гран|угольн|стоеч)/);
   if (wm && kind === "rotunda") p.posts = WORDN[wm[1]];
+  if (wm && kind === "deck") { p.sides = WORDN[wm[1]]; p.shape = "многоугольник"; }
   let m = t.match(/(?<!на\s)(?<![\d.,])(\d+)\s*(?:-?\s*ти|-?\s*х)?\s*(?:стоек|стойки|опор|гран)/);
+  if (m && kind === "deck" && /гран/.test(m[0])) { p.sides = +m[1]; p.shape = "многоугольник"; }
   if (m) { if (kind === "rotunda") p.posts = +m[1]; else if (["pergola", "canopy"].includes(kind)) p.posts_along = Math.max(2, Math.floor(+m[1] / 2)); }
   const PRO = [["post", ["стойк", "столб"]], ["beam", ["балк"]], ["lamel", ["ламел"]], ["ring", ["обвязк"]], ["rafter", ["стропил"]], ["rail", ["перил", "ригел"]], ["purlin", ["обрешетк", "прогон"]], ["frame", ["каркас", "ножк"]]];
-  for (const [k, ws] of PRO) { const pr = profAfter(t, ws, false); if (pr) p[k] = pr; }
+  if (kind === "deck" || kind === "profile") { const pr = profAfter(t, ["ребр", "лаг", "каркас"], false); if (pr) p.rib = pr; const ps = profAfter(t, ["доск", "рейк", "реек", "брус", "ламел"], true); if (ps) p.slat = ps; if ((v = numAfter(t, ["зазор"]))) p.gap = v; if (/бетон/.test(t)) p.support = "concrete"; if (/ножк|каркас/.test(t) && kind === "deck") p.support = "metal"; }
+  if (kind !== "deck" && kind !== "profile") for (const [k, ws] of PRO) { const pr = profAfter(t, ws, false); if (pr) p[k] = pr; }
   if (kind === "bench") {
     const pr = profAfter(t, ["сиден", "реек", "рейк", "брус", "доск"], true); if (pr) p.slat = pr;
     if (/бетон/.test(t)) p.support = "concrete"; if (/(на каркасе|металлическ[а-яё]* (каркас|ножк|опор)|на ножках)/.test(t)) p.support = "metal";
     if (/(без спинки|убери спинку|убрать спинку)/.test(t)) p.backrest = false; else if (/спинк/.test(t)) p.backrest = true;
     if ((v = numAfter(t, ["зазор"]))) p.gap = v;
   }
-  if ((v = numAfter(t, ["шаг", "через"]))) p[kind === "pergola" ? "lamel_step" : "purlin_step"] = mm(v, false);
+  if ((v = numAfter(t, ["шаг ребер", "шаг лаг", "ребра через", "лаги через", "шаг", "через"]))) p[kind === "pergola" ? "lamel_step" : (kind === "deck" || kind === "profile") ? "rib_step" : "purlin_step"] = mm(v, false);
   if ((v = numAfter(t, ["вылет", "свес"]))) p[{ pergola: "lamel_overhang", canopy: "overhang", bench: "support_overhang" }[kind] || "overhang"] = mm(v, false);
   if (kind === "rotunda" && /без перил/.test(t)) p.rail_h = 0;
   return { kind, p };
@@ -564,7 +729,7 @@ function interpret(text, cur) {
   const { kind, p } = parseText(text); if (!kind) return null;
   return { kind, params: p, changes: null };
 }
-return { parse, build, positions, totals, cutting, estimate, interpret, corners, frame, info, elLen, boxSize, isBoxKind, DEF, LABELS, KIND_TITLE, PRICES, PROD, mass };
+return { SHAPES, contour, parse, build, positions, totals, cutting, estimate, interpret, corners, frame, info, elLen, boxSize, isBoxKind, DEF, LABELS, KIND_TITLE, PRICES, PROD, mass };
 })();
 if (typeof module !== "undefined") module.exports = ENG;
 
@@ -583,6 +748,10 @@ const EXAMPLES = [
   ["Навес", "Навес 5х3, спереди 2,6, сзади 2,2, обрешётка 40х20 шаг 500"],
   ["Контейнерная площадка", "Площадка под 3 контейнера 1,1 с крышей"],
   ["Урна", "Урна 400х400х750"],
+  ["Круглый настил", "Круглый настил диаметр 2,4 высота 450, доска 88х40, зазор 15"],
+  ["Скамья-рыба", "Настил рыба 5000х1400 высота 450"],
+  ["Кресло по профилю", "Кресло по профилю 700, наклон спинки 22, рейки 58х40"],
+  ["Скамья-волна", "Скамья-волна длина 2000 глубина 2400 амплитуда 150"],
 ];
 
 // ---------- состояние
@@ -645,6 +814,12 @@ function draw3d(r) {
     const s = ENG.info(e), [a, w, h] = ENG.frame(e); let L, W, H, c;
     if (ENG.isBoxKind(s.kind)) { const [x, y, z] = ENG.boxSize(e); W = x; H = y; L = z; c = [e.start[0] + a[0] * L / 2, e.start[1] + a[1] * L / 2, e.start[2] + a[2] * L / 2]; }
     else { L = ENG.elLen(e); W = s.w; H = s.h; c = [(e.start[0] + e.end[0]) / 2, (e.start[1] + e.end[1]) / 2, (e.start[2] + e.end[2]) / 2]; }
+    if (e.cut) {
+      const C = ENG.corners(e), F = [[0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6], [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2], [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0]];
+      const pos = new Float32Array(F.flatMap(f => f.flatMap(i => C[i]))), geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3)); geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: COL[s.mat], side: THREE.DoubleSide })); group.add(m);
+      group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), lineMat)); continue;
+    }
     const geo = new THREE.BoxGeometry(Math.max(W, 1), Math.max(H, 1), Math.max(L, 1));
     const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: s.kind === "sheet" ? COL.sheet : COL[s.mat] }));
     const M = new THREE.Matrix4().makeBasis(new THREE.Vector3(...w), new THREE.Vector3(...h), new THREE.Vector3(...a)); M.setPosition(...c);
@@ -734,7 +909,7 @@ function buildSheet(r) {
   [[135, 20, 185, 20], [135, 35, 185, 35], [150, 15, 150, 35], [167, 15, 167, 35]].forEach(([a, b, c, d]) => L(sx + a, sy + b, sx + c, sy + d, "РАМКА_ТОНКАЯ"));
   for (let i = 1; i < 11; i++) L(sx, sy + i * 5, sx + 65, sy + i * 5, i === 5 ? "РАМКА" : "РАМКА_ТОНКАЯ");
   [7, 17, 40, 55].forEach(x => L(sx + x, sy, sx + x, sy + 55, "РАМКА"));
-  const t = ENG.totals(r), code = "АРМ." + ({ pergola: "01", rotunda: "02", bench: "03", canopy: "04", urn: "05", container: "06" }[r.kind]) + "." + new Date().toISOString().slice(2, 10).replace(/-/g, "") + ".000 СБ";
+  const t = ENG.totals(r), code = "АРМ." + ({ pergola: "01", rotunda: "02", bench: "03", canopy: "04", urn: "05", container: "06", deck: "07", profile: "08" }[r.kind] || "09") + "." + new Date().toISOString().slice(2, 10).replace(/-/g, "") + ".000 СБ";
   T(sx + 125, sy + 10.5, code, 6, "middle");
   T(sx + 100, sy + 26, r.title, r.title.length > 30 ? 3.2 : 4, "middle"); T(sx + 100, sy + 33, "Сборочный чертёж", 3, "middle");
   T(sx + 142.5, sy + 18.5, "Лит.", 2.2, "middle"); T(sx + 158.5, sy + 18.5, "Масса", 2.2, "middle"); T(sx + 176, sy + 18.5, "Масштаб", 2.2, "middle");
@@ -760,7 +935,7 @@ function sheetSVG(r) {
 }
 
 // ---------- DXF R12 (ASCII, кодировка Windows-1251 — открывает КОМПАС V16+ и AutoCAD)
-const DXF_LAYERS = { "РАМКА": 7, "РАМКА_ТОНКАЯ": 7, "МЕТАЛЛ": 7, "ДЕРЕВО": 30, "БЕТОН": 8, "РАЗМЕРЫ": 3, "ТЕКСТ": 7, "ПОЗИЦИИ": 7, "ТОНКАЯ": 7, "РЕЗ": 1, "ПОДПИСИ": 3 };
+const DXF_LAYERS = { "РАМКА": 7, "РАМКА_ТОНКАЯ": 7, "МЕТАЛЛ": 7, "ДЕРЕВО": 30, "БЕТОН": 8, "РАЗМЕРЫ": 3, "ТЕКСТ": 7, "ПОЗИЦИИ": 7, "ТОНКАЯ": 7, "РЕЗ": 1, "ПОДПИСИ": 3, "ПОМЕТКИ": 1 };
 function dxfDoc(ents) {
   const lay = Object.entries(DXF_LAYERS).map(([n, c]) => `0\nLAYER\n2\n${n}\n70\n0\n62\n${c}\n6\nCONTINUOUS`).join("\n");
   return `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$DWGCODEPAGE\n3\nANSI_1251\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n70\n${Object.keys(DXF_LAYERS).length}\n${lay}\n0\nENDTAB\n0\nTABLE\n2\nSTYLE\n70\n1\n0\nSTYLE\n2\nSTANDARD\n70\n0\n40\n0.0\n41\n1.0\n50\n0.0\n71\n0\n42\n2.5\n3\ntxt\n4\n\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${ents.join("\n")}\n0\nENDSEC\n0\nEOF\n`;
@@ -785,6 +960,10 @@ function sheetDXF(r) {
     if (p.t === "dot") E.push(dCircle(X(p.x), Y(p.y), 0.7 * S, p.layer));
     if (p.t === "arrow") { const l = 3, b = 0.8; E.push(dPoly([[p.x, p.y], [p.x + p.dx * l - p.dy * b, p.y + p.dy * l + p.dx * b], [p.x + p.dx * l + p.dy * b, p.y + p.dy * l - p.dx * b]].map(q => [X(q[0]), Y(q[1])]), p.layer)); }
     if (p.t === "text") E.push(dText(X(p.x), Y(p.y), p.s, p.h * S, p.a, p.rot, p.layer));
+  }
+  for (const a of curAnn()) {
+    if (a.t === "pen" && a.pts.length > 1) E.push(`0\nPOLYLINE\n8\nПОМЕТКИ\n66\n1\n70\n0\n10\n0.0\n20\n0.0\n30\n0.0\n` + a.pts.map(q => `0\nVERTEX\n8\nПОМЕТКИ\n10\n${n4(X(q[0]))}\n20\n${n4(Y(q[1]))}\n30\n0.0`).join("\n") + `\n0\nSEQEND\n8\nПОМЕТКИ`);
+    if (a.t === "ruler") { E.push(dLine(X(a.a[0]), Y(a.a[1]), X(a.b[0]), Y(a.b[1]), "ПОМЕТКИ")); const m = [(a.a[0] + a.b[0]) / 2, (a.a[1] + a.b[1]) / 2]; E.push(dText(X(m[0]), Y(m[1] - 1.5), Math.round(a.L) + " мм", 3.5 * S, "middle", 0, "ПОМЕТКИ")); }
   }
   return dxfDoc(E);
 }
@@ -832,13 +1011,87 @@ function getFile(kind) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Поз.", "Наименование", "Профиль / материал", "ГОСТ", "Размер, мм", "Кол.", "Масса ед., кг", "Масса, кг"], ...ps.map(g => [g.pos, g.name, g.profile, g.gost, g.dims, g.qty, +g.mass1.toFixed(2), +g.mass.toFixed(2)]), [], ["", "Итого, кг", "", "", "", "", "", +t.total.toFixed(1)]]), "Спецификация");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Профиль", "Хлыст / заготовка, мм", "№", "Детали (длина, поз.)", "Остаток, мм", "Остаток"], ...ENG.cutting(prod).flatMap(c => c.bars.map((b, i) => [c.profile, c.stock, i + 1, b.cuts.map(x => `${x.L} (п.${x.pos})`).join(" + "), b.rest, b.usable ? "деловой" : "в отход"]))]), "Раскрой");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Раздел", "Наименование", "Ед.", "Кол-во", "Цена, ₽", "Сумма, ₽"], ...e.lines.map(l => [l[0], l[1], l[2], +l[3].toFixed(3), l[4], Math.round(l[3] * l[4])]), [], ["", "Метизы и расходники", "", "", "", Math.round(e.hw)], ["", "Себестоимость", "", "", "", Math.round(e.cost)], ["", "Накладные", "", "", "", Math.round(e.over)], ["", "Цена изделия", "", "", "", Math.round(e.price)]]), "Смета");
+      if (prod.boards) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["№", "Поз.", "Y оси, мм", "L max, мм", "L min, мм", "Угол слева, °", "Угол справа, °"], ...prod.boards.map(b => [b.no, b.e._pos, b.y, b.Lmax, b.Lmin, b.aL, b.aR])]), "Ведомость досок");
+      if (prod.layout) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["№", "S по кривой, мм", "Y, мм", "Z, мм", "Угол, °"], ...prod.layout.map(l => [l.no, l.s, l.y, l.z, l.ang]), [], ["Развёртка профиля, мм", prod.curveLen]]), "Раскладка по профилю");
+      if (prod.fasten) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[prod.fasten.note], ["Пересечений", prod.fasten.crossings, "Саморезов", prod.fasten.screws], [], ["Ребро", "Поз.", "Отверстий", "Координаты от начала ребра, мм"], ...prod.fasten.holes.map((x, i) => [i + 1, x.rib._pos, x.list.length, x.list.join("; ")])]), "Отверстия в рёбрах");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Принято самостоятельно — проверить"], ...prod.asm.map(a => [a])]), "Допущения");
       XLSX.writeFile(wb, fname(prod, "спецификация_раскрой_смета.xlsx"));
     }
   } catch (err) { note("Не получилось собрать файл: " + err.message); }
 }
 function note(t) { const o = obj(); if (o) { o.log.push({ who: "bot", text: t }); save(); render(); } }
-const FILES_BAR = `<div class="files"><b>Файлы для КОМПАС</b><button class="btn" data-file="sb">Сборочный чертёж DXF</button><button class="btn ghost" data-file="plates">Пластины для лазера DXF</button><button class="btn ghost" data-file="xlsx">Спецификация, раскрой, смета XLSX</button></div>`;
+const FILES_BAR = `<div class="files"><b>Файлы для КОМПАС</b><button class="btn" data-file="sb"><span class="lg">Сборочный чертёж DXF</span><span class="sh">⬇ Чертёж DXF</span></button><button class="btn ghost" data-file="plates"><span class="lg">Пластины для лазера DXF</span><span class="sh">⬇ Пластины DXF</span></button><button class="btn ghost" data-file="xlsx"><span class="lg">Спецификация, раскрой, смета XLSX</span><span class="sh">⬇ Excel</span></button></div>`;
+
+// ---------- карандаш и линейка на чертеже (координаты — мм бумаги; длина линейки — реальные мм с учётом масштаба)
+let TOOL = "pan", DRAW = null, SNAP = null;
+function curAnn() { const o = obj(); if (!o) return []; o.ann = o.ann || {}; return o.ann[o.v] = o.ann[o.v] || []; }
+const DRAWBAR = () => `<div class="drawbar" role="toolbar" aria-label="Инструменты чертежа">
+  <button type="button" class="btn ${TOOL === "pan" ? "" : "ghost"}" data-tool="pan" title="Смотреть и прокручивать">✋<span class="tl"> Смотреть</span></button>
+  <button type="button" class="btn ${TOOL === "pen" ? "" : "ghost"}" data-tool="pen" title="Рисовать от руки">✏️<span class="tl"> Карандаш</span></button>
+  <button type="button" class="btn ${TOOL === "ruler" ? "" : "ghost"}" data-tool="ruler" title="Измерить: тянуть от точки к точке">📏<span class="tl"> Линейка</span></button>
+  <button type="button" class="btn ghost" data-tool="undo" title="Отменить последнюю пометку">↶<span class="tl"> Отменить</span></button>
+  <button type="button" class="btn ghost" data-tool="clear" title="Стереть все пометки на этой версии">🗑<span class="tl"> Очистить</span></button>
+  <span class="drawhint">${TOOL === "pen" ? "Ведите по листу — линия рисуется красным" : TOOL === "ruler" ? "Тяните от точки к точке — длина в мм изделия, концы липнут к углам" : "Пометки сохраняются в версии и попадают в DXF (слой «ПОМЕТКИ»)"}</span></div>`;
+function svgPt(svg, ev) { const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return [+q.x.toFixed(2), +q.y.toFixed(2)]; }
+function snapPt(svg, p) {
+  if (!SNAP) { const b = buildSheet(prod); SNAP = { S: b.S, pts: [] }; for (const q of b.P) { if (q.t === "line") SNAP.pts.push([q.x1, q.y1], [q.x2, q.y2]); if (q.t === "poly" && q.layer !== "РАМКА" && q.layer !== "РАМКА_ТОНКАЯ") SNAP.pts.push(...q.pts); } }
+  const r = 12 * 420 / svg.getBoundingClientRect().width; let best = null, bd = r;
+  for (const q of SNAP.pts) { const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; best = q; } }
+  return best ? [best[0], best[1], 1] : [p[0], p[1], 0];
+}
+function annSVG(list, live) {
+  const sw = 0.5, out = [];
+  for (const a of live ? [...list, live] : list) {
+    if (a.t === "pen" && a.pts.length > 1) out.push(`<polyline points="${a.pts.map(q => q.join(",")).join(" ")}" fill="none" stroke="#d0021b" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    if (a.t === "ruler") {
+      const [x1, y1] = a.a, [x2, y2] = a.b, m = [(x1 + x2) / 2, (y1 + y2) / 2], d = Math.hypot(x2 - x1, y2 - y1) || 1, nx = -(y2 - y1) / d * 1.5, ny = (x2 - x1) / d * 1.5;
+      out.push(`<g stroke="#0057d9" stroke-width="0.5"><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/><line x1="${x1 - nx}" y1="${y1 - ny}" x2="${x1 + nx}" y2="${y1 + ny}"/><line x1="${x2 - nx}" y1="${y2 - ny}" x2="${x2 + nx}" y2="${y2 + ny}"/></g>`);
+      if (a.sa) out.push(`<circle cx="${x1}" cy="${y1}" r="0.9" fill="#0057d9"/>`); if (a.sb) out.push(`<circle cx="${x2}" cy="${y2}" r="0.9" fill="#0057d9"/>`);
+      out.push(`<text x="${m[0]}" y="${m[1] - 2}" font-size="5.5" font-weight="600" text-anchor="middle" font-family="IBM Plex Sans, Arial" fill="#0057d9" stroke="#fff" stroke-width="1.2" paint-order="stroke">${Math.round(a.L)} мм</text>`);
+    }
+  }
+  return out.join("");
+}
+function drawAnn(live) { const g = document.querySelector("#annLayer"); if (g) g.innerHTML = annSVG(curAnn(), live); }
+function wireDrawing() {
+  const svg = document.querySelector('[data-zw="sheet"] svg'); if (!svg) return;
+  if (!svg.querySelector("#annLayer")) { const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.id = "annLayer"; svg.appendChild(g); }
+  svg.style.touchAction = TOOL === "pan" ? "" : "none"; svg.style.cursor = TOOL === "pen" ? "crosshair" : TOOL === "ruler" ? "crosshair" : "";
+  drawAnn();
+  svg.onpointerdown = ev => {
+    if (TOOL === "pan") return; ev.preventDefault(); svg.setPointerCapture(ev.pointerId);
+    const p = svgPt(svg, ev);
+    if (TOOL === "pen") DRAW = { t: "pen", pts: [p] };
+    if (TOOL === "ruler") { const a = snapPt(svg, p); DRAW = { t: "ruler", a: [a[0], a[1]], b: [a[0], a[1]], sa: a[2], sb: 0, L: 0 }; }
+    drawAnn(DRAW);
+  };
+  svg.onpointermove = ev => {
+    if (!DRAW) return; const p = svgPt(svg, ev);
+    if (DRAW.t === "pen") { const l = DRAW.pts[DRAW.pts.length - 1]; if (Math.hypot(p[0] - l[0], p[1] - l[1]) > 0.4) DRAW.pts.push(p); }
+    else { const b = snapPt(svg, p); DRAW.b = [b[0], b[1]]; DRAW.sb = b[2]; DRAW.L = Math.hypot(DRAW.b[0] - DRAW.a[0], DRAW.b[1] - DRAW.a[1]) * SNAP.S; }
+    drawAnn(DRAW);
+  };
+  svg.onpointerup = svg.onpointercancel = () => {
+    if (!DRAW) return; const d = DRAW; DRAW = null;
+    if ((d.t === "pen" && d.pts.length > 1) || (d.t === "ruler" && d.L >= 1)) { curAnn().push(d); save(); }
+    drawAnn();
+  };
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-tool]"); if (!b) return; const t = b.dataset.tool;
+  if (t === "undo") { curAnn().pop(); save(); drawAnn(); return; }
+  if (t === "clear") { if (curAnn().length && confirm("Стереть все пометки на этой версии?")) { curAnn().length = 0; save(); drawAnn(); } return; }
+  TOOL = t; const bar = document.querySelector(".drawbar"); if (bar) bar.outerHTML = DRAWBAR(); wireDrawing();
+});
+
+// ---------- ведомости движка ламелей
+function lamelTables(r) {
+  let h = "";
+  if (r.boards) h += `<h2 style="margin-top:20px">Ведомость досок (тип А — по контуру)</h2><p class="note">Доски параллельны, зазор постоянный. Угол реза — от перпендикуляра к оси доски; L max / L min — длина по длинной и короткой кромке.</p><table><thead><tr><th>№</th><th>Поз.</th><th class="n">Y оси, мм</th><th class="n">L max</th><th class="n">L min</th><th class="n">Угол слева, °</th><th class="n">Угол справа, °</th></tr></thead><tbody>${r.boards.map(b => `<tr><td class="mono">${b.no}</td><td class="mono">${b.e._pos}</td><td class="n">${b.y}</td><td class="n">${b.Lmax}</td><td class="n">${b.Lmin}</td><td class="n">${b.aL}</td><td class="n">${b.aR}</td></tr>`).join("")}</tbody></table>`;
+  if (r.layout) h += `<h2 style="margin-top:20px">Раскладка досок по профилю (тип Б)</h2><p class="note">Все доски одной длины. S — расстояние по кривой от начала профиля до оси доски (развёртка ${r.curveLen} мм); Y, Z — положение оси доски; угол — наклон доски.</p><table><thead><tr><th>№</th><th class="n">S по кривой</th><th class="n">Y</th><th class="n">Z</th><th class="n">Угол, °</th></tr></thead><tbody>${r.layout.map(l => `<tr><td class="mono">${l.no}</td><td class="n">${l.s}</td><td class="n">${l.y}</td><td class="n">${l.z}</td><td class="n">${l.ang}</td></tr>`).join("")}</tbody></table>`;
+  if (r.fasten) h += `<h2 style="margin-top:20px">Скрытый крепёж — отверстия в рёбрах</h2><p class="note">${esc(r.fasten.note)} Пересечений ${r.fasten.crossings}, саморезов ${r.fasten.screws} шт. Координата — от начала ребра${r.layout ? " по развёртке" : ""}, мм.</p><table><thead><tr><th>Ребро</th><th class="n">Отв.</th><th>Координаты отверстий, мм</th></tr></thead><tbody>${r.fasten.holes.map((x, i) => `<tr><td class="mono">${i + 1} (поз. ${x.rib._pos})</td><td class="n">${x.list.length}</td><td class="mono" style="font-size:12px">${x.list.join(" · ")}</td></tr>`).join("")}</tbody></table>`;
+  return h;
+}
 
 // ---------- масштаб (+ / −)
 const ZOOM = {}, ZSTEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6];
@@ -873,10 +1126,11 @@ function renderPane() {
   const pane = $("#pane"), is3d = tab === "3d";
   $("#v3d").style.display = is3d ? "" : "none"; $("#hint").style.display = is3d ? "" : "none"; $("#zoom3d").style.display = is3d ? "" : "none"; pane.hidden = is3d;
   if (is3d || !prod) return;
-  if (tab === "sheet") pane.innerHTML = (platesDXF(prod) ? FILES_BAR : FILES_BAR.replace(/<button[^>]*data-file="plates"[^>]*>[^<]*<\/button>/, "")) + zoomBox(`<div class="sheet">${sheetSVG(prod)}</div>`, "sheet");
+  if (tab === "sheet") pane.innerHTML = (platesDXF(prod) ? FILES_BAR : FILES_BAR.replace(/<button[^>]*data-file="plates"[^>]*>[^<]*<\/button>/, "")) + DRAWBAR() + zoomBox(`<div class="sheet">${sheetSVG(prod)}</div>`, "sheet");
+  if (tab === "sheet") { SNAP = null; wireDrawing(); }
   if (tab === "spec") {
     const ps = ENG.positions(prod);
-    pane.innerHTML = `<table><thead><tr><th>Поз.</th><th>Наименование</th><th>Профиль / материал</th><th>Размер, мм</th><th class="n">Кол.</th><th class="n">Масса ед., кг</th><th class="n">Масса, кг</th></tr></thead><tbody>${ps.map(g => `<tr><td class="mono">${g.pos}</td><td>${esc(g.name)}</td><td>${esc(g.profile)}<br><small class="mono" style="color:var(--muted)">${esc(g.gost)}</small></td><td class="mono">${g.dims}</td><td class="n">${g.qty}</td><td class="n">${fmt(g.mass1, 2)}</td><td class="n">${fmt(g.mass, 1)}</td></tr>`).join("")}</tbody></table>`;
+    pane.innerHTML = `<table><thead><tr><th>Поз.</th><th>Наименование</th><th>Профиль / материал</th><th>Размер, мм</th><th class="n">Кол.</th><th class="n">Масса ед., кг</th><th class="n">Масса, кг</th></tr></thead><tbody>${ps.map(g => `<tr><td class="mono">${g.pos}</td><td>${esc(g.name)}</td><td>${esc(g.profile)}<br><small class="mono" style="color:var(--muted)">${esc(g.gost)}</small></td><td class="mono">${g.dims}</td><td class="n">${g.qty}</td><td class="n">${fmt(g.mass1, 2)}</td><td class="n">${fmt(g.mass, 1)}</td></tr>`).join("")}</tbody></table>` + lamelTables(prod);
   }
   if (tab === "cut") {
     pane.innerHTML = ENG.cutting(prod).map(c => `<h2 style="margin-top:12px">${esc(c.profile)} — ${c.sec.mat === "wood" ? esc(c.source) : `хлыст ${c.stock / 1000} м × ${c.count}, отход ${c.waste} %`}</h2>` +
@@ -901,6 +1155,7 @@ function renderParams() {
   const p = Object.assign({}, ENG.DEF[sp.kind], sp.params);
   box.innerHTML = `<p class="note">${ENG.KIND_TITLE[sp.kind]} · правка любого поля создаёт новую версию.</p>` + Object.keys(ENG.DEF[sp.kind]).map(k => {
     const v = p[k], id = "par-" + k;
+    if (k === "shape" && ENG.SHAPES[sp.kind]) return `<label for="${id}">${ENG.LABELS[k]}<select id="${id}" data-k="${k}">${ENG.SHAPES[sp.kind].map(o => `<option ${String(v) === o ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
     if (typeof ENG.DEF[sp.kind][k] === "boolean") return `<label for="${id}">${ENG.LABELS[k] || k}<select id="${id}" data-k="${k}"><option value="true" ${v === true || v === "true" ? "selected" : ""}>да</option><option value="false" ${!(v === true || v === "true") ? "selected" : ""}>нет</option></select></label>`;
     return `<label for="${id}">${ENG.LABELS[k] || k}<input id="${id}" data-k="${k}" value="${esc(v)}"></label>`;
   }).join("");
