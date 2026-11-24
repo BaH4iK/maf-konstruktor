@@ -134,17 +134,92 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
 @media (max-width: 1100px) { .cols { grid-template-columns: 200px minmax(0, 1fr); } .right { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line); max-height: 70vh; } }
 @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } main { order: 1; grid-template-rows: auto 55vh auto; } .right { order: 2; max-height: none; } aside { order: 3; border-right: none; border-top: 1px solid var(--line); } header .pill:not(.warn) { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Workspace v2: desktop split panels and mobile navigation */
+.app {height:100vh;height:var(--workspace-height,100dvh);overflow:hidden;min-height:0}
+.cols {grid-template-columns:var(--left-width,220px) 7px minmax(0,1fr) 7px var(--right-width,440px);grid-template-rows:minmax(0,1fr);overflow:hidden;min-height:0}
+.cols>aside,.cols>main,.cols>.right {min-width:0;min-height:0;max-height:none}
+.cols>aside {grid-column:1;grid-row:1}
+.cols>main {grid-column:3;grid-row:1;grid-template-rows:auto minmax(0,1fr) auto}
+.cols>.right {grid-column:5;grid-row:1;border-top:0;grid-template-rows:auto minmax(0,1fr)}
+.splitter {grid-row:1;cursor:col-resize;touch-action:none;background:var(--line);position:relative}
+.splitter:after {content:"";position:absolute;left:2px;top:48%;width:2px;height:24px;background:var(--muted);border-radius:2px}
+.splitter:hover,.splitter:focus-visible,.splitter.dragging {background:var(--accent)}
+#splitLeft {grid-column:2} #splitRight {grid-column:4}
+.workspace-nav {display:none}
+.chat {grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
+.log {min-height:0;overscroll-behavior:contain}
+.msg {overflow-wrap:anywhere;flex-shrink:0}
+.compose {display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:end;background:var(--panel);padding:10px;min-width:0}
+.compose textarea {grid-column:1/-1;grid-row:1;min-width:0;width:100%;height:110px;max-height:35vh;resize:vertical;font-size:15px}
+.compose .clip {grid-column:1;grid-row:2;min-height:44px}
+.compose #send {grid-column:3;grid-row:2;min-height:44px}
+.attach {max-height:100px;overflow:auto}
+.model-details {max-height:28vh;overflow:auto;min-height:0;background:var(--panel)}
+.summary {gap:8px 14px;padding:9px 12px}
+.asm {margin:0;padding:8px 16px 12px 28px}
+.detail-toggle {display:block;width:100%;padding:8px;border:0;border-top:1px solid var(--line);background:var(--panel);color:var(--accent);cursor:pointer;text-align:left}
+.model-details:not(.expanded) .asm {display:none}
+.params {min-width:0;min-height:0;align-content:start}
+.workspace-icon {padding:5px 9px;min-height:32px;flex-shrink:0}
+.cols.left-closed {grid-template-columns:0 0 minmax(0,1fr) 7px var(--right-width,440px)}
+.cols.left-closed>aside,.cols.left-closed>#splitLeft {visibility:hidden;padding:0;overflow:hidden;border:0}
+.cols.model-focus {grid-template-columns:0 0 minmax(0,1fr) 0 0}
+.cols.model-focus>aside,.cols.model-focus>.right,.cols.model-focus>.splitter {visibility:hidden;padding:0;overflow:hidden;border:0}
+#accessDialog {width:min(420px,calc(100% - 32px));max-height:calc(100% - 32px);border:1px solid var(--line);border-radius:14px;padding:22px;background:var(--panel);color:var(--ink);box-shadow:0 16px 60px #0004}
+#accessDialog::backdrop {background:#10182099}
+#accessDialog h2 {font-size:20px;text-transform:none;letter-spacing:0;color:var(--ink);margin:0 0 8px}
+#accessDialog p {color:var(--muted);margin:0 0 16px}
+#accessDialog input {width:100%;min-height:46px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:16px}
+.dialog-actions {display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.dialog-actions button {min-height:44px}
+@media(max-width:1050px){
+ .app {grid-template-rows:auto minmax(0,1fr) auto}
+ header {padding:8px 10px;gap:8px;min-width:0}
+ header>span.pill {display:none}
+ #aiPill {display:inline-block;white-space:nowrap;font-size:12px}
+ .workspace-nav {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:4px 4px max(4px,env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+ .workspace-nav button {min-height:48px;border:0;border-radius:7px;background:transparent;color:var(--muted);font-size:11px;font-weight:500;cursor:pointer;padding:3px 1px}
+ .workspace-nav button span {display:block;font-size:19px;line-height:23px}
+ .workspace-nav button[aria-pressed="true"] {background:var(--user);color:var(--accent)}
+ .cols,.cols.left-closed,.cols.model-focus {display:block;position:relative}
+ .cols>aside,.cols>main,.cols>.right {display:none;height:100%;width:100%;border:0;visibility:visible}
+ .cols[data-screen="objects"]>aside {display:flex;padding:14px}
+ .cols[data-screen="model"]>main {display:grid;grid-template-rows:auto minmax(0,1fr) auto!important}
+ .cols[data-screen="chat"]>.right,.cols[data-screen="params"]>.right {display:grid}
+ .cols.model-focus>main {display:grid!important}
+ .cols.model-focus>aside,.cols.model-focus>.right {display:none!important}
+ .app:has(.cols.model-focus) .workspace-nav {display:none}
+ .app:has(.cols.model-focus) {grid-template-rows:auto minmax(0,1fr)}
+ .splitter,#expandChat {display:none}
+ .tabs {min-height:44px;padding:0 8px;scrollbar-width:thin}
+ .tab {padding:10px 12px}
+ .viewhint {font-size:10px;max-width:calc(100% - 24px)}
+ .model-details {max-height:25vh}
+ .summary .kpi b {font-size:14px}
+ .summary {font-size:12px;gap:4px 10px}
+ .compose {padding:8px;gap:6px}
+ .compose textarea {height:95px;font-size:16px;resize:none}
+ .compose #send {padding:8px 14px}
+ .compose .clip {padding:0 12px}
+ .log {padding:10px}
+ .msg {max-width:96%}
+ .params input,.params select,.fform input,.fform select {font-size:16px}
+ .zoomwrap {max-height:none}
+ .pane {overflow-x:auto}
+ .zoombar button {width:36px;height:36px}
+}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <div class="logo">МАФ·<b>конструктор</b></div>
+    <button type="button" class="btn ghost workspace-icon" id="toggleLeft" title="Объекты" aria-label="Объекты">☰</button><div class="logo">МАФ·<b>конструктор</b></div>
     <span class="pill">Армаф · Севастополь</span>
     <span class="sp"></span>
     <button type="button" class="pill warn" id="aiPill" title="ИИ читает свободный текст, эскизы, фото и PDF">ИИ: подключить</button>
   </header>
-  <div class="cols">
+  <div class="cols" data-screen="model">
     <aside>
       <div>
         <h2>Мои объекты</h2>
@@ -160,21 +235,23 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
         <div class="chips" id="examples"></div>
       </div>
     </aside>
+    <div class="splitter" id="splitLeft" role="separator" aria-label="Ширина списка объектов" aria-orientation="vertical" tabindex="0"></div>
     <main>
       <nav class="tabs" id="tabs"></nav>
       <section class="view" id="view">
         <div id="v3d"></div>
-        <div class="zoombar" id="zoom3d"><button type="button" data-z3="in" aria-label="Приблизить" title="Приблизить">+</button><button type="button" data-z3="out" aria-label="Отдалить" title="Отдалить">−</button><button type="button" data-z3="fit" aria-label="Вписать" title="Вписать" style="font-size:16px">⤢</button></div>
+        <div class="zoombar" id="zoom3d"><button type="button" data-z3="in" aria-label="Приблизить" title="Приблизить">+</button><button type="button" data-z3="out" aria-label="Отдалить" title="Отдалить">−</button><button type="button" data-z3="fit" aria-label="Вписать" title="Вписать" style="font-size:16px">⤢</button><button type="button" id="fullModel" aria-label="Полноэкранный просмотр" title="Полноэкранный просмотр" style="font-size:16px">⛶</button></div>
         <div class="viewhint" id="hint">Вращать — мышь / палец · Масштаб — колесо / щипок</div>
         <div id="pane" class="pane" hidden></div>
       </section>
-      <div>
+      <div class="model-details">
         <div class="summary" id="summary"></div>
-        <ul class="asm" id="asm"></ul>
+        <button type="button" class="detail-toggle" aria-expanded="false">Описание и материалы ▾</button><ul class="asm" id="asm"></ul>
       </div>
     </main>
+    <div class="splitter" id="splitRight" role="separator" aria-label="Ширина диалога" aria-orientation="vertical" tabindex="0"></div>
     <section class="right">
-      <div class="rtabs"><button class="tab on" data-r="chat" id="rt-chat">Диалог</button><button class="tab" data-r="params" id="rt-params">Параметры</button></div>
+      <div class="rtabs"><button class="tab on" data-r="chat" id="rt-chat">Диалог</button><button class="tab" data-r="params" id="rt-params">Параметры</button><button type="button" id="expandChat" class="btn ghost workspace-icon" aria-label="Расширить диалог" title="Расширить диалог">⤢</button></div>
       <div id="rpane-chat" class="chat">
         <div class="log" id="log"></div>
         <div class="attach" id="attach" hidden></div>
@@ -188,8 +265,9 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
       <div id="rpane-params" class="params" hidden></div>
     </section>
   </div>
+  <nav class="workspace-nav" aria-label="Рабочие разделы"><button type="button" data-screen-btn="objects" aria-pressed="false"><span>▤</span>Объекты</button><button type="button" data-screen-btn="model" aria-pressed="true"><span>◇</span>3D и чертежи</button><button type="button" data-screen-btn="chat" aria-pressed="false"><span>▱</span>Диалог</button><button type="button" data-screen-btn="params" aria-pressed="false"><span>☷</span>Параметры</button></nav>
 </div>
-
+<dialog id="accessDialog" aria-labelledby="accessTitle"><form id="accessForm"><h2 id="accessTitle">Подключение ИИ</h2><p id="accessHint">Введите код доступа, выданный администратором.</p><label for="accessInput">Код доступа</label><input id="accessInput" type="password" autocomplete="off" required><div class="dialog-actions"><button type="button" id="accessCancel" class="btn ghost">Отмена</button><button type="submit" class="btn">Подключить</button></div></form></dialog>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -823,7 +901,7 @@ let AI_CODE = (() => { try { return localStorage.getItem("maf-ai-code") || ""; }
 let PENDING = [], TG_TRY = !!TG_INIT;   // в Telegram сначала пробуем без кода (если id в списке доверенных)
 const aiReady = () => !!(AI_CODE || TG_TRY);
 function aiPillRender() { const b = $("#aiPill"); if (!b) return; b.textContent = aiReady() ? "ИИ: включён" : "ИИ: подключить"; b.classList.toggle("on", aiReady()); }
-function askCode(reason) { const o = obj() || newObject("Новый объект"); o.log.push({ who: "bot", text: (reason ? reason + "\n\n" : "") + "Чтобы ИИ читал свободный текст, эскизы, фото и PDF, введите код доступа (его выдаёт администратор). Код хранится только в этом браузере.", aicode: true }); save(); render(); }
+function askCode(reason) { const d = $("#accessDialog"); $("#accessHint").textContent = (reason ? reason + " " : "") + "Введите код доступа, выданный администратором. Не API-ключ."; $("#accessInput").value = ""; if (!d.open) d.showModal(); $("#accessInput").focus(); }
 async function callAI(text, files, current) {
   const r = await fetch(AI_URL, { method: "POST", headers: Object.assign({ "Content-Type": "application/json", "X-Auth": TG_INIT ? "tg " + TG_INIT : "code " + AI_CODE }, AI_CODE ? { "X-Code": AI_CODE } : {}), body: JSON.stringify({ text, files, current }) });
   let d = {}; try { d = await r.json(); } catch (e) {}
@@ -1007,9 +1085,9 @@ function draw3d(r) {
     const ed = new THREE.LineSegments(new THREE.EdgesGeometry(geo), lineMat); ed.applyMatrix4(M); group.add(ed);
   }
   const bb = new THREE.Box3().setFromObject(group), ctr = bb.getCenter(new THREE.Vector3()), size = bb.getSize(new THREE.Vector3()).length();
-  if (!R3.fitted || R3.fitted !== r.kind) { cam.position.set(ctr.x - size * 0.9, ctr.y - size * 1.3, ctr.z + size * 0.7); R3.fitted = r.kind; }
-  R3.fit = () => { cam.position.set(ctr.x - size * 0.9, ctr.y - size * 1.3, ctr.z + size * 0.7); ctl.target.copy(ctr); ctl.update(); };
-  ctl.target.copy(ctr); cam.near = size / 100; cam.far = size * 20; cam.updateProjectionMatrix();
+  const shouldFit = R3.fitted !== r.kind || R3.fitSize !== size; R3.fitted = r.kind; R3.fitSize = size;
+  R3.fit = () => { const vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * Math.max(cam.aspect, 0.1)); const dist = Math.max(1,size) / (2 * Math.sin(Math.min(vf, hf) / 2)) * 1.12; const dir = new THREE.Vector3(-0.9,-1.3,0.7).normalize(); cam.position.copy(ctr).addScaledVector(dir,dist); ctl.target.copy(ctr); ctl.update(); };
+  ctl.target.copy(ctr); cam.near = size / 100; cam.far = Math.max(1000,size * 50); cam.updateProjectionMatrix(); if (shouldFit) R3.fit();
 }
 
 // ---------- чертёж (SVG, 3 вида + штамп)
@@ -1387,6 +1465,33 @@ $("#pane").addEventListener("change", ev => { const k = ev.target.dataset.pk; if
 $("#examples").innerHTML = EXAMPLES.map(([n], i) => `<button class="chip" data-ex="${i}">${n}</button>`).join("");
 
 init3d(); aiPillRender();
+
+(function workspaceUI(){
+ const cols=$(".cols"), narrow=matchMedia("(max-width:1050px)");
+ const fit=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{if(R3&&R3.fit&&R3.box.clientWidth&&R3.box.clientHeight)R3.fit();}));
+ function rightTab(t){$("#rt-"+t).click();}
+ function screen(name){if(name!=="model")cols.classList.remove("model-focus");cols.dataset.screen=name;document.querySelectorAll("[data-screen-btn]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.screenBtn===name)));if(name==="model")fit();if(name==="chat")requestAnimationFrame(()=>{$("#log").scrollTop=$("#log").scrollHeight;});}
+ document.querySelectorAll("[data-screen-btn]").forEach(b=>b.onclick=()=>{const n=b.dataset.screenBtn;if(n==="chat"||n==="params")rightTab(n);screen(n);});
+ document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b||!narrow.matches)return;if(b.dataset.go||b.dataset.o||b.dataset.v)screen("model");if(b.id==="newObj"||b.dataset.ex){rightTab("chat");screen("chat");}if(b.dataset.r)screen(b.dataset.r);});
+ const detail=$(".detail-toggle");detail.onclick=()=>{const on=detail.parentElement.classList.toggle("expanded");detail.setAttribute("aria-expanded",String(on));detail.textContent=on?"Свернуть описание ▴":"Описание и материалы ▾";fit();};
+ const defaults={left:220,right:440};let widths={...defaults};try{const p=JSON.parse(localStorage.getItem("maf-panel-widths")||"{}");for(const k of ["left","right"])if(Number.isFinite(p[k]))widths[k]=p[k];}catch(e){}
+ function layout(side,value){const w=cols.clientWidth;if(narrow.matches||!w)return;const other=side==="left"?"right":"left",closed=cols.classList.contains("left-closed");const min=side==="left"?150:280,otherMin=other==="left"?150:280;const avail=w-340-14;if(!(closed&&other==="left"))widths[other]=Math.max(otherMin,Math.min(widths[other],avail-min));widths[side]=Math.max(min,Math.min(value,avail-(closed&&other==="left"?0:widths[other])));for(const k of ["left","right"])cols.style.setProperty("--"+k+"-width",widths[k]+"px");}
+ function persist(){try{localStorage.setItem("maf-panel-widths",JSON.stringify(widths));}catch(e){}}
+ for(const side of ["left","right"]){const h=$("#split"+(side==="left"?"Left":"Right"));h.addEventListener("pointerdown",e=>{if(e.button!==0)return;const x=e.clientX,start=widths[side];h.setPointerCapture(e.pointerId);h.classList.add("dragging");const move=ev=>layout(side,start+(ev.clientX-x)*(side==="left"?1:-1));const end=()=>{h.removeEventListener("pointermove",move);h.removeEventListener("pointerup",end);h.removeEventListener("pointercancel",end);h.classList.remove("dragging");persist();fit();};h.addEventListener("pointermove",move);h.addEventListener("pointerup",end);h.addEventListener("pointercancel",end);});h.addEventListener("keydown",e=>{if(!["ArrowLeft","ArrowRight","Home"].includes(e.key))return;e.preventDefault();layout(side,e.key==="Home"?defaults[side]:widths[side]+(e.key==="ArrowRight"?16:-16)*(side==="left"?1:-1));persist();fit();});h.addEventListener("dblclick",()=>{layout(side,defaults[side]);persist();fit();});}
+ $("#toggleLeft").onclick=()=>{if(narrow.matches){screen("objects");return;}cols.classList.remove("model-focus");cols.classList.toggle("left-closed");layout("right",widths.right);fit();};
+ let previousRight=null;$("#expandChat").onclick=()=>{if(previousRight===null){previousRight=widths.right;layout("right",cols.clientWidth*.55);}else{layout("right",previousRight);previousRight=null;}persist();fit();};
+ $("#fullModel").onclick=()=>{screen("model");cols.classList.toggle("model-focus");$("#fullModel").setAttribute("aria-pressed",String(cols.classList.contains("model-focus")));fit();};
+ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#accessDialog").open&&cols.classList.contains("model-focus")){cols.classList.remove("model-focus");fit();}});
+ const refresh=()=>{layout("right",widths.right);fit();};
+ const tg=window.Telegram&&Telegram.WebApp;
+ function height(){const vv=window.visualViewport;const h=tg&&TG_INIT?Math.min(tg.viewportHeight||window.innerHeight,vv?vv.height:window.innerHeight):vv?vv.height:window.innerHeight;document.documentElement.style.setProperty("--workspace-height",Math.round(h)+"px");}
+ if(tg&&TG_INIT){try{tg.ready();tg.expand();tg.onEvent("viewportChanged",()=>{height();fit();});}catch(e){}}
+ window.addEventListener("resize",()=>{height();refresh();});if(window.visualViewport)window.visualViewport.addEventListener("resize",height);height();refresh();
+ $("#accessCancel").onclick=()=>$("#accessDialog").close();
+ $("#accessForm").addEventListener("submit",e=>{e.preventDefault();const v=$("#accessInput").value.trim();if(!v)return;AI_CODE=v;try{localStorage.setItem("maf-ai-code",v);}catch(er){}const o=obj()||newObject("Новый объект");o.log=o.log.filter(m=>!m.aicode);o.log.push({who:"bot",text:"🤖 Код сохранён. Отправьте задание для проверки доступа."});save();render();aiPillRender();$("#accessDialog").close();rightTab("chat");screen("chat");});
+ $("#accessDialog").addEventListener("close",()=>{$("#accessInput").value="";});
+})();
+
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.closest(".aibox")) { e.preventDefault(); e.target.closest(".aibox").querySelector("[data-aicodeok]").click(); } });
 try {
   const m = location.hash.match(/^#spec=(.+)$/);
