@@ -151,9 +151,12 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
 .log {min-height:0;overscroll-behavior:contain}
 .msg {overflow-wrap:anywhere;flex-shrink:0}
 .compose {display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:end;background:var(--panel);padding:10px;min-width:0}
-.compose textarea {grid-column:1/-1;grid-row:1;min-width:0;width:100%;height:110px;max-height:35vh;resize:vertical;font-size:15px}
-.compose .clip {grid-column:1;grid-row:2;min-height:44px}
-.compose #send {grid-column:3;grid-row:2;min-height:44px}
+.compose textarea {grid-column:1/-1;grid-row:2;min-width:0;width:100%;height:var(--composer-height,110px);max-height:48vh;resize:none;font-size:15px}
+.compose-resize {grid-column:1/-1;grid-row:1;height:12px;cursor:ns-resize;touch-action:none;display:flex;align-items:center;justify-content:center;background:transparent;border:0;padding:0}
+.compose-resize::after {content:"";width:42px;height:4px;border-radius:3px;background:var(--muted);opacity:.65}
+.compose-resize:hover::after,.compose-resize.dragging::after,.compose-resize:focus-visible::after {background:var(--accent);opacity:1}
+.compose .clip {grid-column:1;grid-row:3;min-height:44px}
+.compose #send {grid-column:3;grid-row:3;min-height:44px}
 .attach {max-height:100px;overflow:auto}
 .model-details {max-height:28vh;overflow:auto;min-height:0;background:var(--panel)}
 .summary {gap:8px 14px;padding:9px 12px}
@@ -199,7 +202,7 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
  .summary .kpi b {font-size:14px}
  .summary {font-size:12px;gap:4px 10px}
  .compose {padding:8px;gap:6px}
- .compose textarea {height:95px;font-size:16px;resize:none}
+ .compose textarea {height:var(--composer-height,95px);font-size:16px;resize:none}
  .compose #send {padding:8px 14px}
  .compose .clip {padding:0 12px}
  .log {padding:10px}
@@ -255,7 +258,7 @@ td.n, th.n { text-align: right; font-family: var(--f-mono); }
       <div id="rpane-chat" class="chat">
         <div class="log" id="log"></div>
         <div class="attach" id="attach" hidden></div>
-        <div class="compose">
+        <div class="compose"><button type="button" class="compose-resize" id="composeResize" role="separator" aria-orientation="horizontal" aria-label="Высота поля ввода: вверх — увеличить, вниз — уменьшить" title="Потяните вверх, чтобы увеличить поле ввода"></button>
           <button type="button" class="btn ghost clip" id="clip" title="Приложить эскиз, фото или PDF" aria-label="Приложить файл">📎</button>
           <input type="file" id="file" accept="image/*,application/pdf" multiple hidden>
           <textarea id="input" placeholder="Что начертить или поправить? Например: «стойки 80х80», «добавь спинку», «шаг ламелей 250»"></textarea>
@@ -1378,7 +1381,7 @@ document.addEventListener("click", e => {
 });
 
 // ---------- вкладки
-const TABS = [["3d", "3D"], ["sheet", "Чертёж и файлы"], ["spec", "Спецификация"], ["cut", "Раскрой"], ["cost", "Смета"], ["kd", "Пример КД из ядра"]];
+const TABS = [["3d", "3D"], ["sheet", "Чертёж и файлы"], ["spec", "Спецификация"], ["cut", "Раскрой"], ["cost", "Смета"], ["kd", "КД изделия"]];
 function renderTabs() { $("#tabs").innerHTML = TABS.map(([k, n]) => `<button class="tab ${tab === k ? "on" : ""}" id="tab-${k}" data-t="${k}">${n}</button>`).join(""); }
 function renderPane() {
   const pane = $("#pane"), is3d = tab === "3d";
@@ -1403,10 +1406,14 @@ function renderPane() {
       <tr><td></td><td>Метизы и расходники</td><td></td><td></td><td></td><td class="n">${fmt(e.hw)}</td></tr><tr><td></td><td><b>Себестоимость</b></td><td></td><td></td><td></td><td class="n"><b>${fmt(e.cost)}</b></td></tr>
       <tr><td></td><td>Накладные</td><td></td><td></td><td></td><td class="n">${fmt(e.over)}</td></tr><tr><td></td><td><b>Цена изделия</b></td><td></td><td></td><td></td><td class="n"><b>${fmt(e.price)}</b></td></tr></tbody></table>`;
   }
-  if (tab === "kd") pane.innerHTML = `<p class="note">Так выглядит комплект КД, который серверное ядро выпускает для перголы 4000×3000 (DXF для КОМПАС + PDF). В браузерной демо-версии лист упрощён.</p><div class="samples">
-    <figure>${zoomBox(`<img alt="Сборочный чертёж перголы" src="data:image/jpeg;base64,${SAMPLES.sb}">`, "kd_sb")}<figcaption>Сборочный чертёж: виды, оси, позиции, сварные швы, ТТ, штамп ф.1</figcaption></figure>
-    <figure>${zoomBox(`<img alt="Спецификация" src="data:image/jpeg;base64,${SAMPLES.spec}">`, "kd_spec")}<figcaption>Спецификация по ГОСТ 2.106</figcaption></figure>
-    <figure>${zoomBox(`<img alt="Деталировка" src="data:image/jpeg;base64,${SAMPLES.det}">`, "kd_det")}<figcaption>Деталировка: лист А4 на каждую позицию (пергола и скамья)</figcaption></figure></div>`;
+  if (tab === "kd") {
+    const ps = ENG.positions(prod);
+    pane.innerHTML = `<h2>Конструкторская документация · ${esc(prod.title)}</h2><p class="note">Ниже — сборочный чертёж и спецификация именно выбранного изделия, сформированные по его текущим параметрам. Это предварительная браузерная документация, а не полный утверждённый комплект КД серверного ядра.</p>
+    <div class="files"><button type="button" class="btn ghost" data-go="sheet">Чертёж и экспорт файлов</button><button type="button" class="btn ghost" data-go="spec">Полная спецификация</button><button type="button" class="btn ghost" data-go="cut">Раскрой</button></div>
+    ${zoomBox(`<div class="sheet">${sheetSVG(prod)}</div>`, "kd_current")}
+    <h2 style="margin-top:16px">Спецификация выбранного изделия</h2>
+    <table><thead><tr><th>Поз.</th><th>Наименование</th><th>Материал</th><th>Размер, мм</th><th class="n">Кол.</th><th class="n">Масса, кг</th></tr></thead><tbody>${ps.map(g => `<tr><td>${g.pos}</td><td>${esc(g.name)}</td><td>${esc(g.profile)}</td><td class="mono">${g.dims}</td><td class="n">${g.qty}</td><td class="n">${fmt(g.mass,1)}</td></tr>`).join("")}</tbody></table>` + lamelTables(prod);
+  }
 }
 function renderParams() {
   const sp = spec(), box = $("#rpane-params");
@@ -1468,6 +1475,14 @@ init3d(); aiPillRender();
 
 (function workspaceUI(){
  const cols=$(".cols"), narrow=matchMedia("(max-width:1050px)");
+ const grip=$("#composeResize"), input=$("#input");
+ let savedHeight=null;try{const v=Number(localStorage.getItem("maf-composer-height"));if(v>0)savedHeight=v;}catch(e){}
+ function setComposerHeight(value,saveValue=false){const pane=$("#rpane-chat");const h=pane.clientHeight||window.innerHeight;const max=Math.max(64,Math.min(h-150,window.innerHeight*.48));const next=Math.round(Math.max(64,Math.min(max,value)));input.style.setProperty("--composer-height",next+"px");grip.setAttribute("aria-valuemin","64");grip.setAttribute("aria-valuemax",String(Math.round(max)));grip.setAttribute("aria-valuenow",String(next));if(saveValue){savedHeight=next;try{localStorage.setItem("maf-composer-height",String(next));}catch(e){}}}
+ grip.addEventListener("pointerdown",e=>{if(e.button!==0)return;e.preventDefault();const y=e.clientY,start=input.getBoundingClientRect().height;grip.setPointerCapture(e.pointerId);grip.classList.add("dragging");const move=ev=>setComposerHeight(start+y-ev.clientY);const end=()=>{grip.classList.remove("dragging");grip.removeEventListener("pointermove",move);grip.removeEventListener("pointerup",end);grip.removeEventListener("pointercancel",end);setComposerHeight(input.getBoundingClientRect().height,true);};grip.addEventListener("pointermove",move);grip.addEventListener("pointerup",end);grip.addEventListener("pointercancel",end);});
+ grip.addEventListener("keydown",e=>{if(!["ArrowUp","ArrowDown","Home"].includes(e.key))return;e.preventDefault();setComposerHeight(e.key==="Home"?(narrow.matches?95:110):input.getBoundingClientRect().height+(e.key==="ArrowUp"?16:-16),true);});
+ grip.addEventListener("dblclick",()=>setComposerHeight(narrow.matches?95:110,true));
+ if(savedHeight!==null)setComposerHeight(savedHeight);
+ window.addEventListener("resize",()=>{if(savedHeight!==null)setComposerHeight(savedHeight);});
  const fit=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{if(R3&&R3.fit&&R3.box.clientWidth&&R3.box.clientHeight)R3.fit();}));
  function rightTab(t){$("#rt-"+t).click();}
  function screen(name){if(name!=="model")cols.classList.remove("model-focus");cols.dataset.screen=name;document.querySelectorAll("[data-screen-btn]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.screenBtn===name)));if(name==="model")fit();if(name==="chat")requestAnimationFrame(()=>{$("#log").scrollTop=$("#log").scrollHeight;});}
